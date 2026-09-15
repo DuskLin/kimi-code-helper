@@ -1,0 +1,207 @@
+@import './theme.css';
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--background);
+  -webkit-font-smoothing: antialiased;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+}
+.titlebar {
+  height: 72px;
+  flex-shrink: 0;
+  padding: 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.macos .titlebar {
+  padding-left: 102px;
+}
+.theme-control {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 9px;
+  background: var(--control-background);
+  border: 1px solid var(--border);
+  -webkit-app-region: no-drag;
+}
+.theme-control button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 29px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.theme-control button:hover {
+  color: var(--text);
+}
+.theme-control button.selected {
+  color: var(--text);
+  background: var(--selected);
+  box-shadow: 0 1px 4px #0000000c;
+}
+.empty-workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+.welcome {
+  text-align: center;
+  transform: translateY(-20px);
+  user-select: none;
+}
+.app-logo {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: var(--logo-background);
+  color: var(--logo-text);
+  font-size: 48px;
+  font-weight: 750;
+  letter-spacing: -4px;
+  padding-right: 4px;
+  box-shadow: 0 8px 24px #00000008;
+}
+.logo-dot {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  right: -3px;
+  top: -3px;
+  border: 3px solid var(--background);
+  border-radius: 50%;
+  box-sizing: content-box;
+  background: var(--accent);
+}
+h1 {
+  margin: 0 0 10px;
+  font-size: 25px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.8px;
+}
+.welcome p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.6px;
+}
+.statusbar {
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0 25px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 11px;
+  user-select: none;
+}
+.app-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.app-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.app-status i.ready {
+  background: var(--accent);
+}
+.error-banner {
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--error-background);
+  color: var(--error-text);
+}
+.error-banner button,
+.startup button {
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  padding: 5px 12px;
+  background: transparent;
+}
+.startup {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  text-align: center;
+  gap: 14px;
+}
+.startup p {
+  color: var(--muted);
+}
+@media (max-width: 700px) {
+  .titlebar {
+    padding-right: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

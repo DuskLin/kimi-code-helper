@@ -1,0 +1,42 @@
+{
+  "name": "kimi-code-helper",
+  "version": "0.1.0",
+  "description": "Kimi Code 多账号与性能管理桌面助手",
+  "main": "out/main/index.js",
+  "author": "Kimi Code Helper contributors",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "build": "npm run typecheck && electron-vite build",
+    "test": "npm run test:smoke",
+    "test:smoke": "npm run build && node scripts/smoke.mjs",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "lucide-react": "^0.577.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "playwright": "^1.58.0",
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
