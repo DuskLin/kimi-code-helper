@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, KeyRound, Link2, Moon, Sun } from 'lucide-react'
 import type { AppInfo, Theme } from '../../shared/contracts'
 import { GatewayPanel, type GatewayStatus } from './GatewayPanel'
+import appLogo from './assets/kimi-code-helper-logo.png'
 
 export function App() {
   const [info, setInfo] = useState<AppInfo>()
@@ -75,6 +76,10 @@ export function App() {
   return (
     <div className={`app-shell ${info?.platform === 'darwin' ? 'macos' : ''}`}>
       <header className="titlebar">
+        <div className="app-brand" aria-label="Kimi Code Helper">
+          <img src={appLogo} alt="" aria-hidden="true" />
+          <span>Kimi Code Helper</span>
+        </div>
         <div className="theme-control" role="group" aria-label="展示模式">
           <button
             aria-label="浅色模式"

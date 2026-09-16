@@ -51,6 +51,8 @@ export class RequestHistory {
     this.db.close()
   }
   usage(query: UsageQuery): UsageStats {
+    if (query?.allHistory !== undefined && typeof query.allHistory !== 'boolean')
+      throw new Error('统计时间范围无效')
     if (
       !query ||
       !Number.isSafeInteger(query.start) ||
@@ -62,6 +64,17 @@ export class RequestHistory {
       (query.end - query.start) / query.bucketMs > 366
     )
       throw new Error('统计时间范围无效')
+    if (query.allHistory && query.bucketMs === 86400000) {
+      const earliest = this.db
+        .prepare("SELECT MIN(json_extract(record, '$.time')) AS time FROM requests")
+        .get()!
+      if (earliest.time != null && Number(earliest.time) < query.start) {
+        const start = new Date(Number(earliest.time))
+        start.setHours(0, 0, 0, 0)
+        start.setDate(1)
+        query = { ...query, start: start.getTime() }
+      }
+    }
     for (const value of [query.accountId, query.model])
       if (value !== undefined && (typeof value !== 'string' || value.length > 200))
         throw new Error('统计筛选条件无效')
@@ -83,7 +96,7 @@ export class RequestHistory {
       }
     }
     const speedEligible =
-      "json_extract(record, '$.status') >= 200 AND json_extract(record, '$.status') < 300 AND json_extract(record, '$.streamDurationMs') > 0 AND json_extract(record, '$.usage.output') IS NOT NULL"
+      "json_extract(record, '$.status') >= 200 AND json_extract(record, '$.status') < 300 AND json_extract(record, '$.interruption') IS NULL AND json_extract(record, '$.streamDurationMs') > 0 AND json_extract(record, '$.usage.output') IS NOT NULL"
     const tokenSum =
       "COALESCE(json_extract(record, '$.usage.input'), 0) + COALESCE(json_extract(record, '$.usage.output'), 0) + COALESCE(json_extract(record, '$.usage.cacheRead'), 0) + COALESCE(json_extract(record, '$.usage.cacheWrite'), 0)"
     const tokensKnown =
@@ -197,15 +210,27 @@ export class RequestHistory {
       )
       .all(...values)
       .map((row) => ({ ...totals(row), model: String(row.model || '未知模型') }))
+    const firstTokenEligible =
+      "json_extract(record, '$.status') >= 200 AND json_extract(record, '$.status') < 300 AND json_extract(record, '$.interruption') IS NULL AND json_type(record, '$.firstTokenMs') IN ('integer', 'real') AND json_extract(record, '$.firstTokenMs') >= 0"
+    const weekday =
+      "CAST(strftime('%w', json_extract(record, '$.time') / 1000, 'unixepoch', '+8 hours') AS INTEGER)"
+    const hour =
+      "CAST(strftime('%H', json_extract(record, '$.time') / 1000, 'unixepoch', '+8 hours') AS INTEGER)"
+    const period = `CASE WHEN ${weekday} BETWEEN 1 AND 5 AND ((${hour} >= 9 AND ${hour} < 12) OR (${hour} >= 14 AND ${hour} < 18)) THEN 'peak' ELSE 'off-peak' END`
     const byAccount = this.db
       .prepare(
-        `SELECT json_extract(record, '$.accountId') AS accountId, ${aggregate} FROM requests ${where} AND json_extract(record, '$.accountId') IS NOT NULL GROUP BY accountId`
+        `SELECT json_extract(record, '$.accountId') AS accountId, COALESCE(NULLIF(json_extract(record, '$.model'), ''), '未知模型') AS model, ${period} AS period, AVG(CASE WHEN ${firstTokenEligible} THEN json_extract(record, '$.firstTokenMs') END) AS averageFirstTokenMs, COUNT(CASE WHEN ${firstTokenEligible} THEN 1 END) AS firstTokenSamples, ${aggregate} FROM requests ${where} AND json_extract(record, '$.accountId') IS NOT NULL GROUP BY accountId, model, period ORDER BY accountId, model, period`
       )
       .all(...values)
       .map((row) => {
         const summary = totals(row)
         return {
           accountId: String(row.accountId),
+          model: String(row.model),
+          period: row.period === 'peak' ? ('peak' as const) : ('off-peak' as const),
+          averageFirstTokenMs:
+            row.averageFirstTokenMs == null ? null : Number(row.averageFirstTokenMs),
+          firstTokenSamples: Number(row.firstTokenSamples),
           averageTokensPerSecond: summary.averageTokensPerSecond,
           speedSamples: summary.speedSamples
         }

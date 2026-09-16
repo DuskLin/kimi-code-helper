@@ -76,6 +76,8 @@ export function storedQuota(value: unknown): AccountQuota | null {
   return {
     fiveHour: quotaWindow(data.fiveHour),
     weekly: quotaWindow(data.weekly),
+    ...(data.monthly !== undefined ? { monthly: quotaWindow(data.monthly) } : {}),
+    ...(data.unit === 'percent' ? { unit: 'percent' as const } : {}),
     total: quotaWindow(data.total),
     totalUnlimited: data.totalUnlimited === true
   }

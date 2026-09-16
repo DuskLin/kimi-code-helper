@@ -31,6 +31,8 @@ export interface HelperApi {
 }
 
 export type Region = 'mainland-cn' | 'global'
+export type Provider = 'kimi' | 'deepseek' | 'opencode-go'
+export type ModelProtocol = 'messages' | 'responses' | 'chat-completions'
 export const DEFAULT_ACCOUNT_CONCURRENCY = 20
 export type Strategy = 'balanced'
 export interface Membership {
@@ -41,12 +43,15 @@ export interface Membership {
   weight: number
 }
 export interface AccountInput {
+  /** 旧配置缺省为 Kimi。 */
+  provider?: Provider
   id?: string
   name: string
   kind: 'api-key'
   region: Region
   enabled: boolean
   concurrencyOverride?: number | null
+  modelProtocols?: Record<string, ModelProtocol[]>
   memberships: Membership[]
   secret?: string
 }
@@ -60,11 +65,13 @@ export interface AccountView extends Omit<AccountInput, 'secret' | 'id'> {
   runtime: AccountRuntime
 }
 export interface AccountProbe {
+  provider?: Provider
   id?: string
   region: Region
   secret?: string
 }
 export interface AccountCapabilities {
+  balance?: AccountBalance | null
   models: string[]
   maxConcurrency: number | null
   checkedAt: number
@@ -78,10 +85,25 @@ export interface QuotaWindow {
   resetAt: string | null
 }
 export interface AccountQuota {
+  monthly?: QuotaWindow | null
+  unit?: 'percent'
   fiveHour: QuotaWindow | null
   weekly: QuotaWindow | null
   total: QuotaWindow | null
   totalUnlimited: boolean
+}
+export interface AccountBalance {
+  available: boolean
+  balances: { currency: string; balance: number }[]
+}
+export function accountBaseUrl(region: Region, provider: Provider = 'kimi'): string {
+  if (provider === 'opencode-go') return 'https://opencode.ai/zen/go/v1'
+  return provider === 'deepseek' ? 'https://api.deepseek.com/v1' : kimiBaseUrl(region)
+}
+export function upstreamUrl(region: Region, provider: Provider = 'kimi', route: string): string {
+  if (provider === 'deepseek' && route === '/v1/messages')
+    return 'https://api.deepseek.com/anthropic/v1/messages'
+  return `${accountBaseUrl(region, provider)}${route.slice(3)}`
 }
 export function kimiBaseUrl(region: Region): string {
   return region === 'global' ? 'https://api.kimi.ai/coding/v1' : 'https://api.kimi.com/coding/v1'

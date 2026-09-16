@@ -14,6 +14,42 @@ const forwarded = []
 let fiveHourRemaining = 40
 let weeklyRemaining = 80
 const upstream = createServer((req, res) => {
+  if (req.url === '/zen/go/v1/models' || req.url === '/zen/go/v1/usage') {
+    assert.equal(req.headers.authorization, 'Bearer smoke-opencode-key')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(
+      JSON.stringify(
+        req.url.endsWith('/models')
+          ? { data: [{ id: 'glm-test' }, { id: 'minimax-test' }, { id: 'gpt-test' }] }
+          : {
+              usage: {
+                rolling: { percent: 10, resetsAt: '2030-01-01T05:00:00Z' },
+                weekly: { percent: 20 },
+                monthly: { percent: 30 }
+              }
+            }
+      )
+    )
+    return
+  }
+  if (req.url === '/v1/models' || req.url === '/user/balance') {
+    assert.equal(req.headers.authorization, 'Bearer smoke-deepseek-key')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(
+      JSON.stringify(
+        req.url === '/v1/models'
+          ? { data: [{ id: 'deepseek-test-model' }] }
+          : {
+              is_available: true,
+              balance_infos: [
+                { currency: 'CNY', total_balance: '12.50' },
+                { currency: 'USD', total_balance: '2.75' }
+              ]
+            }
+      )
+    )
+    return
+  }
   if (req.url === '/coding/v1/usages') {
     assert.equal(req.headers['user-agent'], 'KimiCLI/1.6')
     res.writeHead(200, { 'content-type': 'application/json' })
@@ -73,7 +109,7 @@ await writeFile(
   const realFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const url = new URL(String(input));
-    if (['api.kimi.com', 'api.kimi.ai'].includes(url.hostname)) {
+    if (['api.kimi.com', 'api.kimi.ai', 'api.deepseek.com', 'opencode.ai'].includes(url.hostname)) {
       return realFetch('http://127.0.0.1:${upstreamPort}' + url.pathname + url.search, init);
     }
     return realFetch(input, init);
@@ -159,9 +195,10 @@ try {
       ''
     )
     await page.getByLabel('API Key', { exact: true }).press('Tab')
-    await page.waitForFunction(() =>
-      document.querySelector('textarea[aria-label="可用模型"]')?.value.includes('kimi-for-coding')
-    )
+    await page
+      .getByRole('table', { name: '可用模型' })
+      .getByText('kimi-for-coding', { exact: true })
+      .waitFor()
     assert.equal(await page.getByLabel('账号并发上限', { exact: true }).inputValue(), '30')
     if (name === '开发账号 A') {
       await page.getByLabel('账号并发上限', { exact: true }).fill('5')
@@ -193,7 +230,10 @@ try {
       assert.equal(await page.getByLabel('账号名称', { exact: true }).inputValue(), name)
       assert.equal(await page.getByLabel('账号并发上限', { exact: true }).inputValue(), '5')
     }
-    assert.equal(await page.getByLabel('可用模型', { exact: true }).getAttribute('readonly'), '')
+    assert.equal(
+      await page.getByLabel('kimi-for-coding Messages', { exact: true }).isChecked(),
+      true
+    )
     await page.getByText('剩余 80 / 100', { exact: true }).waitFor()
     await page.getByText('剩余 40 / 50', { exact: true }).waitFor()
     await page.getByRole('button', { name: '保存账号', exact: true }).click()
@@ -275,7 +315,26 @@ try {
   await page.screenshot({ path: join(artifacts, 'usage.png') })
   const heatmap = page.getByRole('region', { name: '每日消耗热力图', exact: true })
   await heatmap.locator('.heatmap-day.is-today').waitFor()
-  assert.equal(await heatmap.locator('.heatmap-day').count(), 112)
+  await heatmap.locator('.heatmap-day.is-today').hover()
+  await heatmap.getByRole('tooltip').waitFor()
+  assert.match(await heatmap.getByRole('tooltip').textContent(), /使用了.*Token/)
+  assert.equal(await heatmap.locator('.heatmap-day.is-today').getAttribute('title'), null)
+  await page.screenshot({ path: join(artifacts, 'heatmap-tooltip-daily.png') })
+  assert.ok((await heatmap.locator('.heatmap-day').count()) > 300)
+  await heatmap.getByRole('button', { name: '每周', exact: true }).click()
+  assert.ok((await heatmap.locator('.heatmap-level-3').count()) > 0)
+  await heatmap.locator('.heatmap-level-3').last().hover()
+  assert.match(await heatmap.getByRole('tooltip').textContent(), /当周：/)
+  assert.equal(await heatmap.locator('.is-hovered').count(), 7)
+  await page.screenshot({ path: join(artifacts, 'heatmap-tooltip-weekly.png') })
+  await heatmap.getByRole('button', { name: '累计', exact: true }).click()
+  assert.ok((await heatmap.locator('.heatmap-level-3').count()) > 0)
+  await heatmap.locator('.heatmap-level-3').last().focus()
+  assert.match(await heatmap.getByRole('tooltip').textContent(), /截至.*累计/)
+  await page.screenshot({ path: join(artifacts, 'heatmap-tooltip-cumulative.png') })
+  await page.keyboard.press('Escape')
+  assert.equal(await heatmap.getByRole('tooltip').count(), 0)
+  await heatmap.getByRole('button', { name: '每日', exact: true }).click()
   await heatmap.locator('.heatmap-day.is-today').click()
   await heatmap.getByText('kimi-for-coding', { exact: true }).waitFor()
   assert.match(await heatmap.locator('.heatmap-day-summary').textContent(), /4 次请求.*4,400/)
@@ -414,6 +473,95 @@ try {
     await page.evaluate(() => getComputedStyle(document.body).backgroundColor),
     'rgb(248, 249, 250)'
   )
+  await page.getByRole('button', { name: '添加账号', exact: true }).first().click()
+  await page.getByLabel('供应商', { exact: true }).selectOption('deepseek')
+  assert.equal(await page.getByLabel('账号区域', { exact: true }).count(), 0)
+  await page.getByLabel('账号名称', { exact: true }).fill('DeepSeek 测试账号')
+  await page.getByLabel('API Key', { exact: true }).fill('smoke-deepseek-key')
+  await page.getByLabel('API Key', { exact: true }).press('Tab')
+  await page.getByText('CNY 12.5', { exact: true }).waitFor()
+  await page.getByText('USD 2.75', { exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('上游 Base URL', { exact: true }).inputValue(),
+    'https://api.deepseek.com/v1'
+  )
+  await page
+    .getByRole('table', { name: '可用模型' })
+    .getByText('deepseek-test-model', { exact: true })
+    .waitFor()
+  await page.screenshot({ path: join(artifacts, 'deepseek-editor.png') })
+  await page.getByRole('button', { name: '保存账号', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek 测试账号' })
+    .getByText('USD 2.75', { exact: true })
+    .waitFor()
+  await application.close()
+  application = undefined
+  page = await launch()
+  const deepseekAccount = await page.evaluate(async () =>
+    (await window.kimiHelper.getGateway()).accounts.find(
+      (account) => account.provider === 'deepseek'
+    )
+  )
+  assert.equal(deepseekAccount.name, 'DeepSeek 测试账号')
+  assert.equal(deepseekAccount.capabilities.balance.balances.length, 2)
+  await page.getByText('DeepSeek 测试账号', { exact: true }).waitFor()
+  await page.screenshot({ path: join(artifacts, 'deepseek-overview.png') })
+  await page.getByRole('button', { name: '账号管理', exact: true }).click()
+  await page.getByRole('button', { name: '添加账号', exact: true }).click()
+  await page.getByLabel('供应商', { exact: true }).selectOption('opencode-go')
+  assert.equal(await page.getByLabel('账号区域', { exact: true }).count(), 0)
+  await page.getByLabel('账号名称', { exact: true }).fill('OpenCode Go 测试账号')
+  await page.getByLabel('API Key', { exact: true }).fill('smoke-opencode-key')
+  await page.getByLabel('API Key', { exact: true }).press('Tab')
+  await page.getByRole('dialog').getByText('剩余 70%', { exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('上游 Base URL', { exact: true }).inputValue(),
+    'https://opencode.ai/zen/go/v1'
+  )
+  assert.equal(await page.getByLabel('minimax-test Messages', { exact: true }).isChecked(), true)
+  assert.equal(await page.getByLabel('minimax-test Responses', { exact: true }).isChecked(), false)
+  await page.getByLabel('minimax-test Responses', { exact: true }).check()
+  await page.getByLabel('minimax-test Messages', { exact: true }).uncheck()
+  assert.equal(await page.getByLabel('minimax-test Responses', { exact: true }).isDisabled(), false)
+  await page.getByLabel('minimax-test Responses', { exact: true }).uncheck()
+  assert.equal(await page.getByLabel('minimax-test Responses', { exact: true }).isChecked(), false)
+  await page.getByLabel('minimax-test Responses', { exact: true }).check()
+  await page.getByRole('button', { name: '获取上游信息', exact: true }).click()
+  await page.getByLabel('minimax-test Responses', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('minimax-test Responses', { exact: true }).isChecked(), true)
+  await page.getByRole('table', { name: '可用模型' }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(artifacts, 'opencode-go-editor.png') })
+  await page.getByRole('button', { name: '保存账号', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  const goRow = page.getByRole('row').filter({ hasText: 'OpenCode Go 测试账号' })
+  await goRow.getByText('月 70%', { exact: true }).waitFor()
+  const kimiFont = await page
+    .locator('.quota-summary > span')
+    .first()
+    .evaluate((element) => getComputedStyle(element).fontSize)
+  assert.equal(
+    await goRow
+      .locator('.quota-summary > span')
+      .evaluate((element) => getComputedStyle(element).fontSize),
+    kimiFont
+  )
+  await application.close()
+  application = undefined
+  page = await launch()
+  const goAccount = await page.evaluate(async () =>
+    (await window.kimiHelper.getGateway()).accounts.find(
+      (account) => account.provider === 'opencode-go'
+    )
+  )
+  assert.equal(goAccount.capabilities.quota.monthly.remaining, 70)
+  assert.equal(goAccount.capabilities.quota.unit, 'percent')
+  assert.deepEqual(goAccount.modelProtocols['minimax-test'], ['responses'])
+  await page.getByText('OpenCode Go 测试账号', { exact: true }).waitFor()
+  await page.screenshot({ path: join(artifacts, 'opencode-go-overview.png') })
+  await page.getByRole('button', { name: '账号管理', exact: true }).click()
   await application.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(640, 440)
   )
@@ -426,6 +574,87 @@ try {
   await page.getByRole('button', { name: '停止网关', exact: true }).click()
   await page.getByRole('button', { name: '启动网关', exact: true }).waitFor()
   await page.getByRole('button', { name: '复制 URL', exact: true }).waitFor({ state: 'hidden' })
+  // 仅隔离的测试进程注入已聚合数据，验证峰谷列、首 token 单位和多模型布局。
+  const performancePreview = await page.evaluate(async () => {
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const stats = await window.kimiHelper.getUsageStats({
+      start: start.getTime(),
+      end: start.getTime() + 86400000,
+      bucketMs: 3600000
+    })
+    const snapshot = await window.kimiHelper.getGateway()
+    stats.byAccount = [
+      {
+        accountId: snapshot.accounts[0].id,
+        model: 'kimi-for-coding-highspeed',
+        period: 'off-peak',
+        averageFirstTokenMs: 180,
+        firstTokenSamples: 2,
+        averageTokensPerSecond: 62.9,
+        speedSamples: 2
+      },
+      {
+        accountId: snapshot.accounts[0].id,
+        model: 'kimi-for-coding-highspeed',
+        period: 'peak',
+        averageFirstTokenMs: 1260,
+        firstTokenSamples: 3,
+        averageTokensPerSecond: 45.6,
+        speedSamples: 3
+      },
+      {
+        accountId: snapshot.accounts[0].id,
+        model: 'k3',
+        period: 'peak',
+        averageFirstTokenMs: 2300,
+        firstTokenSamples: 1,
+        averageTokensPerSecond: 18.5,
+        speedSamples: 1
+      },
+      {
+        accountId: snapshot.accounts.find((account) => account.provider === 'opencode-go').id,
+        model: 'deepseek-flash',
+        period: 'off-peak',
+        averageFirstTokenMs: 420,
+        firstTokenSamples: 2,
+        averageTokensPerSecond: 92.5,
+        speedSamples: 2
+      },
+      {
+        accountId: snapshot.accounts.find((account) => account.provider === 'opencode-go').id,
+        model: 'deepseek-flash',
+        period: 'peak',
+        averageFirstTokenMs: 980,
+        firstTokenSamples: 3,
+        averageTokensPerSecond: 61.3,
+        speedSamples: 3
+      }
+    ]
+    return stats
+  })
+  await application.evaluate(({ ipcMain, BrowserWindow }, stats) => {
+    ipcMain.removeHandler('gateway:usage-stats')
+    ipcMain.handle('gateway:usage-stats', () => stats)
+    BrowserWindow.getAllWindows()[0].setSize(1120, 900)
+  }, performancePreview)
+  await page.getByRole('button', { name: '返回概览', exact: true }).click()
+  const performanceTable = page.getByRole('table', {
+    name: 'kimi-for-coding-highspeed 峰谷表现',
+    exact: true
+  })
+  await performanceTable.getByText('180ms', { exact: true }).waitFor()
+  await performanceTable.getByText('1.26s', { exact: true }).waitFor()
+  await performanceTable.getByText('62.9 tokens/s', { exact: true }).waitFor()
+  await performanceTable.getByText('45.6 tokens/s', { exact: true }).waitFor()
+  assert.equal(
+    await page
+      .getByRole('table', { name: 'k3 峰谷表现', exact: true })
+      .getByText('—', { exact: true })
+      .count(),
+    2
+  )
+  await page.screenshot({ path: join(artifacts, 'peak-offpeak-performance.png') })
   assert.deepEqual(errors, [])
   console.log(
     '通过：真实 Electron、进程隔离、主题、统一账号管理、系统加密存储、真实 HTTP 负载均衡、重启恢复与自动启动、请求记录及最小窗口布局。'

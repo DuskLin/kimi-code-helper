@@ -1,10 +1,26 @@
 # Kimi Code Helper
 
-基于 Electron、React 和 TypeScript 的 Kimi Code 多账号桌面网关。
+基于 Electron、React 和 TypeScript 的 Kimi Code / DeepSeek / OpenCode Go 多账号桌面网关。
+
+OpenCode Go 接入：在「添加账号」中选择「OpenCode Go · 订阅」，填写已订阅 Go 的 API Key。使用固定的 `https://opencode.ai/zen/go/v1`，从 `/models` 获取模型、从 `/usage` 获取 5 小时、周、月三个已用百分比窗口，界面显示剩余百分比。三个窗口中任一个新鲜额度耗尽时暂不调度，查询失败保留旧值和原同步时间。模型目录是公开接口，因此用量接口返回 401/403 时会拒绝保存密钥。
+
+OpenCode Go 支持 Chat Completions、Responses、Anthropic Messages 三种客户端协议互转。网关按模型选原生上游协议：`gpt-*`、`grok-*`、`muse-spark-*` 使用 Responses，`minimax-*`、`qwen*` 使用 Messages，其余模型使用 Chat Completions；客户端无需跟随模型切换接口。转换请求和 JSON/SSE 响应，支持系统指令、图片、函数工具及结果、并行工具调用、Responses custom/namespace 客户端工具、思考强度、输出上限和缓存用量换算。同协议仍原样透传，开始输出后不重试。转换逻辑参考 `sub2api_local/backend/internal/pkg/apicompat`，端点规则参考 [OpenCode Go 官方文档](https://opencode.ai/docs/go/#endpoints)。
+
+跨协议需要完整消息历史，不支持引用另一上游私有的 `previous_response_id`、`conversation`、`item_reference`、`file_id`；上游托管搜索工具、后台任务和 `n>1` 返回明确的 400，不会静默丢弃。OpenCode Go 的 `/v1/messages/count_tokens` 在本地估算，并通过 `x-token-count-estimated: true` 标明，不能当作准确账单用量。跨协议转换限制单个 SSE 事件 1 MB、累计输出内容 16 MB；工具参数不合法、流中断或缺少结束事件不会伪造成功结束。OpenCode Zen 按量付费账号不在当前接入范围。
+
+Go 请求转发 `x-opencode-session`：优先复用客户端会话头、`prompt_cache_key` 或 Anthropic `metadata.user_id` 中的会话 ID，均缺失时为本次请求生成 UUID，重试保持同一值。保留客户端 User-Agent，未提供时使用本应用标识；稳定的客户端会话标识有助于上游缓存命中。
+
+账号编辑窗口的「可用模型」以列表展示，每个模型可勾选 Messages、Responses、Completions（Chat Completions）三种上游原生 API，至少选择一种。OpenCode Go 默认沿用按模型确定的原生协议，Kimi/DeepSeek 默认三项均选。请求优先走已勾选的同协议接口；没有同协议时，优先使用已勾选的供应商默认协议，否则按 Messages → Responses → Completions 顺序转换。手动配置按账号和模型保存，刷新、启停和重启保留；新增模型采用默认值，「恢复默认协议」清除手动配置，切换供应商也会重置。勾选表示上游确实支持该接口，不会让上游新增能力。
+
+DeepSeek 接入：在「添加账号」中选择「DeepSeek · 按量付费」，填写开放平台 API Key。模型从官方 `/v1/models` 同步，余额从 `/user/balance` 同步，分别展示 CNY、USD 等币种，不相加或换算；明确返回不可用余额的账号暂停调度，刷新恢复可用后自动参与调度。余额查询失败会保留上次余额及同步时间，并提示错误。
+
+DeepSeek 参考 `sub2api_local` 的原生协议路由：Chat Completions、Responses 使用 `https://api.deepseek.com/v1`，Anthropic Messages 使用 `https://api.deepseek.com/anthropic/v1/messages`。网关 `/v1/models` 汇总已启用、已同步账号的模型，客户端须指定对应模型 ID；现有 Kimi 配置示例使用 Kimi 模型，接入 DeepSeek 时需要修改客户端模型。没有硬编码 DeepSeek 模型列表或套餐额度；并发沿用上游明确值、默认 20 和手动覆盖规则。旧配置未指定供应商时按 Kimi 读取，切换供应商须重新填写 API Key。
 
 ## 多账号负载均衡
 
-- **账号**：仅支持 API Key；中国区与国际区；编辑、启停、删除；官方上游地址固定，可用模型、额度与并发上限由上游同步。
+概览的账号卡片按模型分别展示今日峰期、谷期的平均首 token 时间和平均生成速度。按请求开始时间、北京时间（UTC+8）归类：周一至周五 09:00–12:00、14:00–18:00 为峰期，起点计入、终点不计入；其余包括周末为谷期。首 token 为成功且未中断、已记录首字耗时请求的算术平均（含重试等待）；速度为该时段有效流式请求的总输出 token 除以总上游流式时长（含首字等待）。无有效样本显示「—」，悬停数值查看样本数和口径。
+
+- **账号**：支持 Kimi Code 与 DeepSeek API Key；Kimi 可选择中国区与国际区，DeepSeek 为按量付费；编辑、启停、删除；官方上游地址固定，可用模型、额度或余额与并发上限由上游同步。
 - **统一账号池**：无需账号分组，所有账号共同参与调度。已有分组地址与密钥作为兼容入口保留，统一使用同一个账号池。
 - **调度**：粘性会话优先；新会话统一按并发与额度均衡评分。先筛选启用状态、模型、认证、冷却、并发和已确认耗尽的额度，再复用可用的会话绑定账号，否则选择得分最高的账号。旧策略自动迁移，旧账号优先级与手动权重不再参与调度。
 - **故障切换**：401/403 暂停账号；408/429/5xx、连接失败进入冷却并尝试账号池内的其他账号；429 尊重更长的 `Retry-After`（最多 24 小时）。其他 4xx 原样返回。请求最多尝试配置次数，同一账号不重复尝试。
@@ -22,7 +38,7 @@
 ## 开始使用
 
 1. 启动应用，首屏显示网关控制、成功率，以及已关联账号的 5h / 7D 剩余额度卡片（紧凑显示剩余比例和重置时间，悬停查看额度数值与更新时间），支持单账号刷新，底部状态栏显示网关运行状态与监听地址。点击「账号管理」进入账号池和请求记录；点击「返回概览」回到首屏。
-2. 在「账号池」添加两个或更多 Kimi 账号。填写 Kimi Code 控制台生成的 API Key，自动获取上游信息，或点击「获取上游信息」手动刷新。
+2. 在「账号池」添加 Kimi Code 或 DeepSeek 账号。选择供应商，填写对应平台生成的 API Key，自动获取上游信息，或点击「获取上游信息」手动刷新。同一模型有多个可用账号时，网关自动分配请求。
 3. 根据需要修改账号并发上限；新会话自动按并发和剩余额度分配。会话保持时间可在网关设置中修改。
 4. 点击「启动网关」，默认端口为 `17300`；端口占用时可停止网关后修改端口。
 5. 在账号池点击「地址」「复制密钥」「Kimi 配置」或「Claude 配置」，将客户端指向本地网关。
@@ -49,9 +65,9 @@ curl http://127.0.0.1:17300/v1/chat/completions \
   -d '{"model":"kimi-for-coding","messages":[{"role":"user","content":"你好"}],"stream":true}'
 ```
 
-支持的端点：`POST /v1/responses`、`POST /v1/chat/completions`、`POST /v1/messages`、`POST /v1/messages/count_tokens`、`GET /v1/models`。旧 `/groups/<分组ID>` 前缀保留兼容，但不再隔离账号池。鉴权接受 `Authorization: Bearer ...` 或 `x-api-key`，分组路径与密钥不匹配时拒绝请求。客户端提供的认证头不会透传，上游请求使用所选账号的凭据。三个生成接口均按原路径转发请求体、查询参数及 JSON/SSE 响应，不进行协议转换。
+支持的端点：`POST /v1/responses`、`POST /v1/chat/completions`、`POST /v1/messages`、`POST /v1/messages/count_tokens`、`GET /v1/models`。旧 `/groups/<分组ID>` 前缀保留兼容，但不再隔离账号池。鉴权接受 `Authorization: Bearer ...` 或 `x-api-key`，分组路径与密钥不匹配时拒绝请求。客户端提供的认证头不会透传，上游请求使用所选账号的凭据。Kimi、DeepSeek 保持原生协议透传；OpenCode Go 按模型选择上游协议，必要时转换请求与响应。统计读取转换前的上游用量，按客户端协议记录请求分类。
 
-各接口的最终可用性由上游决定；模型列表透传一个可用账号的结果。请求体上限 8 MB，总超时默认 300 秒，无空闲账号时返回 503。当前不支持 WebSocket、协议转换或跨机器共享网关。
+各接口的最终可用性由上游决定；模型列表汇总已启用、已同步账号的模型。请求体上限 8 MB，总超时默认 300 秒，无空闲账号时返回 503。当前不支持 WebSocket 或跨机器共享网关。
 
 macOS 关闭窗口后网关继续运行，退出应用才停止；其他平台关闭最后一个窗口会退出应用。启用「打开应用时自动启动网关」可在下次启动时恢复监听。统计、会话保持和冷却状态仅保存在内存中，退出后清空；账号、密钥、网关设置和请求摘要持久保存。请求摘要位于用户数据目录的 `gateway.json.requests.sqlite`，不自动清理；页面仅加载 10 条。早于本次更新且已丢失的内存记录无法补回。
 

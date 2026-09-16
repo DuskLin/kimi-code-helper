@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import {
-  kimiBaseUrl,
+  upstreamUrl,
   type AccountCapabilities,
   type GatewaySnapshot,
   type RequestRecord,
@@ -15,6 +15,7 @@ import {
   object,
   string,
   validateAccount,
+  validateProvider,
   validateGateway
 } from './gateway-store'
 import { KimiCapabilities } from './kimi-capabilities'
@@ -24,6 +25,16 @@ import { RequestHistory } from './request-history'
 import { ResponseIdsObserver, validRequestId } from './response-ids'
 import type { TokenUsage, UsageProtocol } from '../../shared/usage'
 import { QUOTA_REFRESH_MS } from '../../shared/kimi-quota'
+import { openCodeSession } from '../../shared/opencode-go'
+import { modelUpstreamRoute } from '../../shared/model-protocols'
+import {
+  convertRequest,
+  estimateInputTokens,
+  ProtocolError,
+  routeProtocol,
+  type Wire
+} from './protocol-request'
+import { convertResponse } from './protocol-response'
 
 class HttpError extends Error {
   constructor(
@@ -204,15 +215,18 @@ export class Gateway {
     const input = validateAccount(value, this.store.get().groups)
     const old = this.store.get().accounts.find((a) => a.id === input.id)
     if (input.id && !old) throw new Error('账号不存在')
+    if (old && old.provider !== input.provider && !input.secret)
+      throw new Error('切换供应商请填写新的 API Key')
     const key = input.secret || old?.credential.accessToken
     if (!key) throw new Error('请填写 API Key')
     const needsRefresh =
       !old?.capabilities ||
       old.capabilities.quota === undefined ||
       old.region !== input.region ||
+      old.provider !== input.provider ||
       old.credential.accessToken !== key
     const capabilities = needsRefresh
-      ? await this.capabilities.get(input.region, key)
+      ? await this.capabilities.get(input.region, key, false, input.provider)
       : old.capabilities!
     const id = await this.store.saveAccount(input, capabilities, key)
     if (input.secret || !input.id) this.scheduler.reset(id)
@@ -226,35 +240,46 @@ export class Gateway {
       ? this.store.get().accounts.find((a) => a.id === string(input.id, '账号 ID'))
       : undefined
     if (input.id && !old) throw new Error('账号不存在')
+    const provider = validateProvider(input.provider ?? old?.provider)
+    if (old && provider !== old.provider && !input.secret)
+      throw new Error('切换供应商请填写新的 API Key')
     const key = input.secret ? string(input.secret, 'API Key', 16384) : old?.credential.accessToken
     if (!key || /[\s\x00-\x1f\x7f]/.test(key)) throw new Error('请填写有效的 API Key')
-    return this.capabilities.get(input.region as Region, key)
+    return this.capabilities.get(input.region as Region, key, false, provider)
   }
   async refreshAccount(value: unknown): Promise<GatewaySnapshot> {
     const id = string(value, '账号 ID')
     const old = this.store.get().accounts.find((a) => a.id === id)
     if (!old?.credential.accessToken) throw new Error('请先填写 API Key')
-    const capabilities = await this.capabilities.get(old.region, old.credential.accessToken, true)
+    const capabilities = await this.capabilities.get(
+      old.region,
+      old.credential.accessToken,
+      true,
+      old.provider
+    )
     await this.store.mutate((data) => {
       const account = data.accounts.find((a) => a.id === id)
       if (
         !account ||
         account.region !== old.region ||
+        account.provider !== old.provider ||
         account.credential.accessToken !== old.credential.accessToken
       )
         throw new Error('账号已变更，请重新同步')
       // 用量接口失败时保留上次真实额度及其时间，不能把旧额度标成刚获取。
       const refreshed =
-        !capabilities.quota && account.capabilities?.quota
+        (!capabilities.quota && account.capabilities?.quota) ||
+        (!capabilities.balance && account.capabilities?.balance)
           ? {
               ...capabilities,
-              quota: account.capabilities.quota,
-              checkedAt: account.capabilities.checkedAt
+              quota: account.capabilities?.quota,
+              balance: account.capabilities?.balance,
+              checkedAt: account.capabilities!.checkedAt
             }
           : capabilities
       Object.assign(
         account,
-        capabilityFields(account.region, refreshed, account.concurrencyOverride)
+        capabilityFields(account.region, refreshed, account.concurrencyOverride, account.provider)
       )
     })
     return this.snapshot()
@@ -371,11 +396,30 @@ export class Gateway {
       if (!group) throw new HttpError(401, '分组密钥无效或与接入地址不匹配')
       groupName = '统一账号池'
       if (!group.enabled) throw new HttpError(403, '该分组已停用')
+      if (isModels) {
+        const models = [
+          ...new Set(
+            data.accounts
+              .filter(
+                (account) =>
+                  account.enabled && account.credential.accessToken && account.capabilities
+              )
+              .flatMap((account) => account.models)
+          )
+        ]
+        finalStatus = 200
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model' })) })
+        )
+        return
+      }
       const body = isModels ? undefined : await bodyOf(req)
       let session =
         typeof req.headers['x-session-id'] === 'string' ? req.headers['x-session-id'] : ''
+      let goSession = ''
+      let payload: Wire = {}
       if (body) {
-        let payload: Record<string, unknown>
         try {
           payload = object(JSON.parse(body.toString('utf8')))
           model = string(payload.model, '模型', 200)
@@ -398,8 +442,12 @@ export class Gateway {
           reasoningEffort = effort
         if (!session && typeof payload.prompt_cache_key === 'string')
           session = payload.prompt_cache_key
+        goSession = openCodeSession(req.headers, payload)
       }
       if (session.length > 512) throw new HttpError(400, '会话标识超过 512 个字符')
+      if (!session) session = goSession
+      // 无会话字段时仅为本次请求生成，重试复用；不将所有客户端绑定到同一会话。
+      goSession ||= randomUUID()
       const excluded = new Set<string>()
       while (attempts < settings.maxAttempts && !controller.signal.aborted) {
         // 每次尝试读取最新配置，禁用、删除和分组变更立即影响后续调度。
@@ -427,6 +475,21 @@ export class Gateway {
         try {
           const token = account.credential.accessToken
           if (controller.signal.aborted) break
+          if (account.provider === 'opencode-go' && route === '/v1/messages/count_tokens') {
+            finalStatus = 200
+            res.writeHead(200, {
+              'content-type': 'application/json',
+              'x-token-count-estimated': 'true'
+            })
+            res.end(JSON.stringify({ input_tokens: estimateInputTokens(payload) }))
+            return
+          }
+          const targetRoute = modelUpstreamRoute(account, model, route)
+          const converted =
+            targetRoute !== route
+              ? convertRequest(payload, routeProtocol(route), routeProtocol(targetRoute))
+              : undefined
+          const requestBody = converted ? Buffer.from(JSON.stringify(converted.body)) : body
           const headers = new Headers({
             'content-type': 'application/json',
             authorization: `Bearer ${token}`,
@@ -436,14 +499,23 @@ export class Gateway {
             const value = req.headers[name]
             if (typeof value === 'string') headers.set(name, value)
           }
-          if (route.startsWith('/v1/messages') && !headers.has('anthropic-version'))
+          if (targetRoute.startsWith('/v1/messages') && !headers.has('anthropic-version'))
             headers.set('anthropic-version', '2023-06-01')
+          if (account.provider === 'opencode-go') {
+            headers.set('x-opencode-session', goSession)
+            if (!headers.has('user-agent')) headers.set('user-agent', 'Kimi-Code-Helper/0.1.0')
+            if (targetRoute === '/v1/messages') headers.set('x-api-key', token)
+            else {
+              headers.delete('anthropic-version')
+              headers.delete('anthropic-beta')
+            }
+          }
           const upstream = await this.request(
-            `${kimiBaseUrl(account.region)}${route.slice(3)}${url.search}`,
+            `${upstreamUrl(account.region, account.provider, targetRoute)}${url.search}`,
             {
               method: req.method,
               headers,
-              body: body ? new Uint8Array(body) : undefined,
+              body: requestBody ? new Uint8Array(requestBody) : undefined,
               signal: controller.signal,
               redirect: 'manual'
             }
@@ -496,9 +568,14 @@ export class Gateway {
             const value = upstream.headers.get(name)
             if (value) outgoing[name] = value
           }
+          if (converted)
+            outgoing['content-type'] =
+              upstream.ok && payload.stream === true
+                ? 'text/event-stream; charset=utf-8'
+                : 'application/json'
           res.writeHead(upstream.status, outgoing)
           res.flushHeaders()
-          // 原样转发 SSE、工具调用和普通响应；开始输出后不再重试，避免重复生成。
+          // 同协议透传；跨协议在背压管线中转换。开始输出后不再重试。
           if (upstream.body) {
             const source = Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0])
             // pipeline 会销毁下游；先标记上游故障，避免将它误判为用户主动取消。
@@ -520,7 +597,7 @@ export class Gateway {
                   console.info(`[gateway] upstream requestId=${id}`)
                 }
               },
-              protocol,
+              converted ? routeProtocol(targetRoute) : protocol,
               (reported) => {
                 usage = {
                   input: null,
@@ -539,7 +616,32 @@ export class Gateway {
                 else interruption ??= 'upstream_error'
               }
             )
-            if (upstream.ok && streaming) {
+            if (converted) {
+              const convert = async function* (chunks: AsyncIterable<Buffer>) {
+                try {
+                  yield* convertResponse(chunks, {
+                    source: routeProtocol(targetRoute),
+                    target: routeProtocol(route),
+                    context: converted.context,
+                    inputStream: streaming,
+                    outputStream: upstream.ok && payload.stream === true,
+                    ok: upstream.ok
+                  })
+                } catch (error) {
+                  if (!controller.signal.aborted) {
+                    upstreamStreamFailed = true
+                    interruption ??= 'upstream_error'
+                  }
+                  throw error
+                }
+              }
+              if (upstream.ok && payload.stream === true) {
+                const observer = new FirstTokenObserver(() => {
+                  firstTokenMs ??= Math.round(performance.now() - startedTick)
+                })
+                await pipeline(source, ids, convert, observer, res, { signal: controller.signal })
+              } else await pipeline(source, ids, convert, res, { signal: controller.signal })
+            } else if (upstream.ok && streaming) {
               const observer = new FirstTokenObserver(() => {
                 firstTokenMs ??= Math.round(performance.now() - startedTick)
               })
@@ -554,10 +656,16 @@ export class Gateway {
           } else if (upstream.ok) this.scheduler.success(account.id, Date.now() - attemptStarted)
           else this.scheduler.failure(account.id, upstream.status, settings.cooldownSeconds)
           return
-        } catch {
+        } catch (error) {
+          if (error instanceof ProtocolError && error.status === 400) throw error
           if (!disconnected && (!controller.signal.aborted || timedOut))
             this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
           if (res.headersSent) {
+            if (!controller.signal.aborted) {
+              upstreamStreamFailed = true
+              interruption ??=
+                error instanceof ProtocolError ? 'upstream_error' : 'upstream_disconnect'
+            }
             finalStatus = timedOut ? 504 : 502
             res.destroy()
             return
@@ -575,11 +683,19 @@ export class Gateway {
       res.setHeader('retry-after', String(settings.cooldownSeconds))
       throw new HttpError(503, '无可用账号：请检查凭据、模型、并发上限、额度或冷却状态')
     } catch (error) {
-      finalStatus = timedOut ? 504 : error instanceof HttpError ? error.status : 500
+      finalStatus = timedOut
+        ? 504
+        : error instanceof HttpError || error instanceof ProtocolError
+          ? error.status
+          : 500
       jsonError(
         res,
         finalStatus,
-        timedOut ? '上游请求超时' : error instanceof HttpError ? error.message : '本地网关处理失败'
+        timedOut
+          ? '上游请求超时'
+          : error instanceof HttpError || error instanceof ProtocolError
+            ? error.message
+            : '本地网关处理失败'
       )
     } finally {
       if (controller.signal.aborted && !interruption) interruption = 'gateway_shutdown'

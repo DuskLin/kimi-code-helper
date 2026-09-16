@@ -22,6 +22,318 @@ import { Gateway } from '../src/main/services/gateway'
 import { Scheduler } from '../src/main/services/scheduler'
 import { KimiCapabilities, reportedConcurrency } from '../src/main/services/kimi-capabilities'
 import { parseKimiQuota, quotaWindow } from '../src/shared/kimi-quota'
+import { parseDeepSeekBalance } from '../src/shared/deepseek-balance'
+import { openCodeGoRoute, openCodeSession, parseOpenCodeGoQuota } from '../src/shared/opencode-go'
+
+test('OpenCode Go percent quotas preserve three windows, reset formats and unknown values', () => {
+  const quota = parseOpenCodeGoQuota({
+    usage: {
+      rolling: { percent: '12.5', resetsAt: 1893456000 },
+      weekly: { percent: 100, resetsAt: 1893456000000 },
+      monthly: { percent: 105, resetsAt: '2030-01-01T00:00:00Z' }
+    }
+  })!
+  assert.equal(quota.unit, 'percent')
+  assert.equal(quota.fiveHour?.remaining, 87.5)
+  assert.equal(quota.weekly?.remaining, 0)
+  assert.equal(quota.monthly?.remaining, 0)
+  for (const window of [quota.fiveHour, quota.weekly, quota.monthly])
+    assert.equal(window?.resetAt, '2030-01-01T00:00:00.000Z')
+  assert.equal(parseOpenCodeGoQuota({ usage: { monthly: { percent: null } } }), null)
+  assert.equal(parseOpenCodeGoQuota({ usage: { monthly: { percent: 'NaN' } } }), null)
+  assert.equal(
+    parseOpenCodeGoQuota({ usage: { monthly: { percent: 0, resetsAt: 'invalid' } } })?.monthly
+      ?.resetAt,
+    null
+  )
+})
+
+test('OpenCode Go public catalog cannot validate an invalid API key', async () => {
+  for (const status of [401, 403]) {
+    const reader = new KimiCapabilities(async (url) =>
+      String(url).endsWith('/models')
+        ? Response.json({ data: [{ id: 'glm-test' }] })
+        : new Response('', { status })
+    )
+    await assert.rejects(reader.get('mainland-cn', 'invalid', false, 'opencode-go'), /API Key 无效/)
+  }
+})
+
+test('OpenCode Go session forwarding prefers explicit headers and safely reads metadata', () => {
+  assert.equal(openCodeSession({ 'session-id': 'codex-native' }, {}), 'codex-native')
+  for (const resetsAt of [0, '0', -1, '-1'])
+    assert.equal(
+      parseOpenCodeGoQuota({ usage: { rolling: { percent: 0, resetsAt } } })?.fiveHour?.resetAt,
+      null
+    )
+  assert.equal(
+    openCodeSession(
+      { 'x-opencode-session': 'native', 'x-session-id': 'other' },
+      { prompt_cache_key: 'body' }
+    ),
+    'native'
+  )
+  assert.equal(openCodeSession({ session_id: 'codex' }, {}), 'codex')
+  assert.equal(openCodeSession({}, { metadata: { user_id: '{"session_id":"claude"}' } }), 'claude')
+  assert.equal(openCodeSession({}, { prompt_cache_key: 'kimi' }), 'kimi')
+  assert.equal(openCodeSession({ 'x-opencode-session': 'bad\r\nheader' }, {}), '')
+})
+
+test('OpenCode Go native routing, streaming, session headers, persistence and monthly exhaustion', async () => {
+  const f = await storeFixture()
+  let monthly = 30
+  let usageFails = false
+  const calls: { url: string; headers: Headers; body: string }[] = []
+  const models = ['glm-test', 'gpt-test', 'minimax-test']
+  const events = 'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n'
+  const gateway = new Gateway(
+    f.store,
+    async (url, init) => {
+      calls.push({
+        url: String(url),
+        headers: new Headers(init?.headers),
+        body: Buffer.from(init?.body as Uint8Array).toString()
+      })
+      return new Response(events, { headers: { 'content-type': 'text/event-stream' } })
+    },
+    async (url, init) => {
+      assert.ok(String(url).startsWith('https://opencode.ai/zen/go/v1/'))
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer secret-go')
+      if (String(url).endsWith('/models'))
+        return Response.json({ data: models.map((id) => ({ id })) })
+      assert.equal(String(url), 'https://opencode.ai/zen/go/v1/usage')
+      return usageFails
+        ? new Response('', { status: 503 })
+        : Response.json({
+            usage: {
+              rolling: { percent: 10 },
+              weekly: { percent: 20 },
+              monthly: { percent: monthly }
+            }
+          })
+    }
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount({ ...accountInput('go'), provider: 'opencode-go' })
+    const account = f.store.get().accounts[0]
+    assert.equal(account.baseUrl, 'https://opencode.ai/zen/go/v1')
+    const loaded = new GatewayStore(f.file, f.secrets)
+    await loaded.load()
+    assert.deepEqual(loaded.get().accounts, f.store.get().accounts)
+    await assert.rejects(gateway.saveAccount({ ...account, provider: 'deepseek' }), /新的 API Key/)
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const headers = {
+      authorization: `Bearer ${f.store.get().groups[0].key}`,
+      'content-type': 'application/json',
+      'user-agent': 'test-coding-agent/1.0'
+    }
+    const root = `http://127.0.0.1:${reserved.port}`
+    for (const model of models) {
+      const route = openCodeGoRoute(model)
+      const body = JSON.stringify({
+        model,
+        stream: true,
+        prompt_cache_key: 'stable-conversation',
+        messages: [{ role: 'user', content: 'hi' }],
+        input: 'hi'
+      })
+      const result = await fetch(root + route, { method: 'POST', headers, body })
+      assert.equal(result.status, 200)
+      assert.equal(await result.text(), events)
+      const last = calls.at(-1)!
+      assert.equal(last.url, 'https://opencode.ai/zen/go' + route)
+      assert.equal(last.body, body)
+      assert.equal(last.headers.get('x-opencode-session'), 'stable-conversation')
+      assert.equal(last.headers.get('user-agent'), 'test-coding-agent/1.0')
+      assert.equal(last.headers.get('authorization'), 'Bearer secret-go')
+      if (route === '/v1/messages') assert.equal(last.headers.get('x-api-key'), 'secret-go')
+    }
+    const mismatch = await fetch(root + '/v1/messages', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: 'glm-test',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'hi' }]
+      })
+    })
+    assert.equal(mismatch.status, 200)
+    assert.equal((await mismatch.json()).content[0].text, 'hello')
+    assert.equal(calls.at(-1)!.url, 'https://opencode.ai/zen/go/v1/chat/completions')
+    assert.equal(calls.length, 4)
+    usageFails = true
+    await gateway.refreshAccount(account.id)
+    assert.equal(f.store.get().accounts[0].capabilities?.checkedAt, account.capabilities?.checkedAt)
+    assert.equal(f.store.get().accounts[0].capabilities?.quota?.monthly?.remaining, 70)
+    usageFails = false
+    monthly = 100
+    await gateway.refreshAccount(account.id)
+    const exhausted = await fetch(root + '/v1/chat/completions', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: 'glm-test' })
+    })
+    assert.equal(exhausted.status, 503)
+    await exhausted.text()
+    assert.equal(calls.length, 4)
+    monthly = 0
+    await gateway.refreshAccount(account.id)
+    const recovered = await fetch(root + '/v1/chat/completions', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: 'glm-test' })
+    })
+    assert.equal(recovered.status, 200)
+    await recovered.text()
+    assert.match(calls.at(-1)!.headers.get('x-opencode-session')!, /^[a-f0-9-]{36}$/)
+  } finally {
+    await gateway.shutdown()
+    await f.cleanup()
+  }
+})
+
+test('DeepSeek balance validates amounts and preserves all currencies', () => {
+  assert.deepEqual(
+    parseDeepSeekBalance({
+      is_available: false,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '0' },
+        { currency: 'USD', total_balance: '1.25' }
+      ]
+    }),
+    {
+      available: false,
+      balances: [
+        { currency: 'CNY', balance: 0 },
+        { currency: 'USD', balance: 1.25 }
+      ]
+    }
+  )
+  for (const total_balance of ['', null, true, 'NaN', 'Infinity'])
+    assert.throws(() => parseDeepSeekBalance({ balance_infos: [{ total_balance }] }))
+})
+
+test('DeepSeek metadata uses isolated cache, official models and balance endpoints', async () => {
+  const calls: string[] = []
+  const capabilities = new KimiCapabilities(async (url) => {
+    calls.push(String(url))
+    if (String(url).endsWith('/user/balance'))
+      return Response.json({
+        is_available: true,
+        balance_infos: [{ currency: 'USD', total_balance: '12.34' }]
+      })
+    return Response.json({
+      data: [{ id: String(url).includes('deepseek') ? 'deepseek-model' : 'kimi-for-coding' }]
+    })
+  })
+  const deepseek = await capabilities.get('mainland-cn', 'same-key', false, 'deepseek')
+  assert.equal(deepseek.balance?.balances[0].balance, 12.34)
+  assert.equal(deepseek.quota, null)
+  assert.equal(deepseek.maxConcurrency, null)
+  assert.deepEqual(calls, [
+    'https://api.deepseek.com/v1/models',
+    'https://api.deepseek.com/user/balance'
+  ])
+  assert.deepEqual((await capabilities.get('mainland-cn', 'same-key')).models, ['kimi-for-coding'])
+})
+
+test('mixed providers persist, route all protocols, preserve failed balance refresh and reject unavailable balance', async () => {
+  const fixture = await storeFixture()
+  let available = true
+  let balanceFails = false
+  const forwarded: { url: string; key: string | null; body: string }[] = []
+  const gateway = new Gateway(
+    fixture.store,
+    async (url, init) => {
+      forwarded.push({
+        url: String(url),
+        key: new Headers(init?.headers).get('authorization'),
+        body: Buffer.from(init?.body as Uint8Array).toString()
+      })
+      return Response.json({ choices: [{ message: { content: 'ok' } }] })
+    },
+    async (url) => {
+      if (String(url).endsWith('/user/balance'))
+        return balanceFails
+          ? new Response('', { status: 503 })
+          : Response.json({
+              is_available: available,
+              balance_infos: [
+                { currency: 'CNY', total_balance: '10.5' },
+                { currency: 'USD', total_balance: '2' }
+              ]
+            })
+      return Response.json({
+        data: [{ id: String(url).includes('deepseek') ? 'deepseek-model' : 'kimi-for-coding' }]
+      })
+    }
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount(accountInput('kimi'))
+    await gateway.saveAccount({ ...accountInput('ds'), provider: 'deepseek' })
+    const ds = fixture.store.get().accounts.find((a) => a.provider === 'deepseek')!
+    const restored = new GatewayStore(fixture.file, fixture.secrets)
+    await restored.load()
+    assert.deepEqual(restored.get().accounts, fixture.store.get().accounts)
+    assert.equal(ds.baseUrl, 'https://api.deepseek.com/v1')
+    await assert.rejects(gateway.saveAccount({ ...ds, provider: 'kimi' }), /新的 API Key/)
+    await assert.rejects(
+      gateway.inspectAccount({ id: ds.id, region: ds.region, provider: 'kimi' }),
+      /新的 API Key/
+    )
+    await gateway.saveSettings({ ...fixture.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const headers = {
+      authorization: `Bearer ${fixture.store.get().groups[0].key}`,
+      'content-type': 'application/json'
+    }
+    const root = `http://127.0.0.1:${reserved.port}`
+    const catalog = await fetch(`${root}/v1/models`, { headers })
+    assert.deepEqual((await catalog.json()).data.map((m: { id: string }) => m.id).sort(), [
+      'deepseek-model',
+      'kimi-for-coding'
+    ])
+    for (const path of ['/v1/chat/completions', '/v1/messages', '/v1/responses']) {
+      const body = JSON.stringify({
+        model: 'deepseek-model',
+        messages: [{ role: 'user', content: 'test' }],
+        input: 'test'
+      })
+      const response = await fetch(root + path, { method: 'POST', headers, body })
+      assert.equal(response.status, 200)
+      await response.text()
+      assert.deepEqual(forwarded.at(-1), {
+        url: `https://api.deepseek.com${path === '/v1/messages' ? '/anthropic' : ''}${path}`,
+        key: 'Bearer secret-ds',
+        body
+      })
+    }
+    balanceFails = true
+    await gateway.refreshAccount(ds.id)
+    const retained = fixture.store.get().accounts.find((a) => a.id === ds.id)!.capabilities!
+    assert.deepEqual(retained.balance, ds.capabilities!.balance)
+    assert.equal(retained.checkedAt, ds.capabilities!.checkedAt)
+    balanceFails = false
+    available = false
+    await gateway.refreshAccount(ds.id)
+    const result = await fetch(root + '/v1/chat/completions', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: 'deepseek-model' })
+    })
+    assert.equal(result.status, 503)
+    await result.text()
+    assert.equal(forwarded.length, 3)
+  } finally {
+    await gateway.shutdown()
+    await fixture.cleanup()
+  }
+})
 
 // 测试使用独立随机密钥，生产环境的系统加密另由 Electron 冒烟测试覆盖。
 function codec(): SecretCodec {

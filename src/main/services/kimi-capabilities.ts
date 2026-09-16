@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto'
 import {
   DEFAULT_ACCOUNT_CONCURRENCY,
-  kimiBaseUrl,
+  accountBaseUrl,
+  type Provider,
   type AccountCapabilities,
   type Region
 } from '../../shared/contracts'
 import { object, string } from './gateway-store'
 import { parseKimiQuota } from '../../shared/kimi-quota'
+import { parseDeepSeekBalance } from '../../shared/deepseek-balance'
+import { parseOpenCodeGoQuota } from '../../shared/opencode-go'
 
 export class CapabilityError extends Error {
   constructor(
@@ -59,13 +62,18 @@ export class KimiCapabilities {
   private pending = new Map<string, Promise<AccountCapabilities>>()
   constructor(private readonly request: typeof fetch = fetch) {}
 
-  async get(region: Region, key: string, force = false): Promise<AccountCapabilities> {
-    const fingerprint = createHash('sha256').update(`${region}\0${key}`).digest('hex')
+  async get(
+    region: Region,
+    key: string,
+    force = false,
+    provider: Provider = 'kimi'
+  ): Promise<AccountCapabilities> {
+    const fingerprint = createHash('sha256').update(`${provider}\0${region}\0${key}`).digest('hex')
     const cached = this.cache.get(fingerprint)
     if (!force && cached && Date.now() - cached.checkedAt < 60000) return structuredClone(cached)
     let work = this.pending.get(fingerprint)
     if (!work) {
-      work = this.fetch(region, key)
+      work = this.fetch(region, key, provider)
       this.pending.set(fingerprint, work)
     }
     try {
@@ -125,8 +133,12 @@ export class KimiCapabilities {
     }
   }
 
-  private async fetch(region: Region, key: string): Promise<AccountCapabilities> {
-    const base = kimiBaseUrl(region)
+  private async fetch(
+    region: Region,
+    key: string,
+    provider: Provider
+  ): Promise<AccountCapabilities> {
+    const base = accountBaseUrl(region, provider)
     const signal = AbortSignal.timeout(15000)
     const models: string[] = []
     const concurrency: number[] = []
@@ -148,19 +160,45 @@ export class KimiCapabilities {
     if (models.length > 2000) throw new Error('上游模型列表过大')
     let warning = ''
     let quota = null
+    let balance = null
     // 无论模型接口是否报告并发，都查询用量，以同步真实额度及 parallel.limit。
     try {
-      const usage = await this.read(`${base}/usages`, key, signal, '额度与并发信息')
+      const usage = await this.read(
+        provider === 'deepseek'
+          ? 'https://api.deepseek.com/user/balance'
+          : `${base}/${provider === 'opencode-go' ? 'usage' : 'usages'}`,
+        key,
+        signal,
+        provider === 'deepseek' ? '余额' : '额度与并发信息'
+      )
       const limit = reportedConcurrency(usage.data, usage.headers)
       if (limit !== null) concurrency.push(limit)
-      quota = parseKimiQuota(usage.data)
-      if (!quota) warning = '上游未返回额度数据'
+      if (provider === 'deepseek') balance = parseDeepSeekBalance(usage.data)
+      else {
+        quota =
+          provider === 'opencode-go' ? parseOpenCodeGoQuota(usage.data) : parseKimiQuota(usage.data)
+        if (!quota) warning = '上游未返回额度数据'
+      }
     } catch (error) {
+      // Go 的模型目录是公开的，必须让用量接口的鉴权失败阻止保存无效密钥。
+      if (
+        provider === 'opencode-go' &&
+        error instanceof CapabilityError &&
+        (error.status === 401 || error.status === 403)
+      )
+        throw error
       warning = error instanceof Error ? error.message : '上游额度与并发信息读取失败'
     }
     const maxConcurrency = concurrency.length ? Math.min(...concurrency) : null
     if (maxConcurrency === null)
       warning = `${warning ? warning + '；' : ''}未获取到并发上限，使用默认 ${DEFAULT_ACCOUNT_CONCURRENCY} 个并发调度`
-    return { models: [...new Set(models)], maxConcurrency, checkedAt: Date.now(), warning, quota }
+    return {
+      models: [...new Set(models)],
+      maxConcurrency,
+      checkedAt: Date.now(),
+      warning,
+      quota,
+      ...(provider === 'deepseek' ? { balance } : {})
+    }
   }
 }

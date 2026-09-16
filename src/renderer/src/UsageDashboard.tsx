@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { Activity, ArrowDown, ArrowUp, DollarSign, RotateCcw, Sparkles, Zap } from 'lucide-react'
+import { Activity, ArrowDown, ArrowUp, CircleSlash, DollarSign, Sparkles, Zap } from 'lucide-react'
 import type { UsageStats, UsageTotals } from '../../shared/usage'
 import { heatmapRange } from '../../shared/usage'
 import { UsageHeatmap } from './UsageHeatmap'
@@ -211,14 +211,15 @@ function Trend({ points, hourly }: { points: UsageStats['points']; hourly: boole
 }
 
 export function UsageDashboard({
+  interval,
   onAccountStats
 }: {
+  interval: number
   onAccountStats: (stats: UsageStats['byAccount']) => void
 }) {
   const cacheTooltipId = useId()
   const [data, setData] = useState<UsageStats>()
   const [calendar, setCalendar] = useState<UsageStats>()
-  const [interval, setIntervalMs] = useState(5000)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   useEffect(() => {
@@ -236,7 +237,11 @@ export function UsageDashboard({
             end: end.getTime(),
             bucketMs: 3600000
           }),
-          window.kimiHelper.getUsageStats({ ...heatmapRange(), bucketMs: 86400000 })
+          window.kimiHelper.getUsageStats({
+            ...heatmapRange(),
+            bucketMs: 86400000,
+            allHistory: true
+          })
         ])
         if (active) {
           setData(result)
@@ -273,33 +278,16 @@ export function UsageDashboard({
           {error}
         </p>
       )}
+      <UsageHeatmap data={calendar} />
       <div className="usage-hero">
         <div className="usage-total">
-          <span className="usage-glyph">
-            <Zap size={22} />
-          </span>
           <div>
-            <small>真实消耗 Tokens</small>
-            <strong title={exact(s?.totalTokens)}>
-              {loading ? '…' : exact(s?.totalTokens)}
-              <em>
-                {s?.totalTokens != null && s.totalTokens >= 10000
-                  ? `≈ ${compact(s.totalTokens)}`
-                  : ''}
-              </em>
-            </strong>
+            <small>
+              <Zap size={13} />
+              真实消耗 Tokens
+            </small>
+            <strong title={exact(s?.totalTokens)}>{loading ? '…' : exact(s?.totalTokens)}</strong>
           </div>
-          <button
-            className="usage-refresh"
-            aria-label="切换自动刷新间隔"
-            title={`每 ${interval / 1000} 秒自动刷新，点击切换为 ${interval === 5000 ? 15 : interval === 15000 ? 30 : 5} 秒`}
-            onClick={() =>
-              setIntervalMs((value) => (value === 5000 ? 15000 : value === 15000 ? 30000 : 5000))
-            }
-          >
-            <RotateCcw size={14} />
-            <span>{interval / 1000}s</span>
-          </button>
         </div>
         <div className="usage-metrics">
           {metrics.map(({ label, key, icon: Icon }) => (
@@ -376,29 +364,18 @@ export function UsageDashboard({
             </small>
             <strong>{money(s?.cost)}</strong>
           </div>
+          <div
+            tabIndex={0}
+            title={`按网关检测到的中断事件统计：客户端 ${s?.interruptionCounts.client ?? 0} · 超时 ${s?.interruptionCounts.timeout ?? 0} · 上游 ${s?.interruptionCounts.upstream ?? 0} · 退出 ${s?.interruptionCounts.shutdown ?? 0}\n已报告用量 ${s?.interruptedReported ?? 0} / ${s?.interruptedRequests ?? 0} · ${exact(s?.interruptedTokens)} tokens · ${money(s?.interruptedCost)}\n用量仅包含中断前已报告的部分`}
+          >
+            <small>
+              <CircleSlash size={13} />
+              中断请求
+            </small>
+            <strong>{s?.interruptedRequests ?? 0} 次</strong>
+          </div>
         </div>
       </div>
-      <div className="usage-performance">
-        <div
-          className="usage-performance-card"
-          title="按网关检测到的中断事件统计：客户端断开、超时、上游流中断或错误、网关退出；用量仅包含中断前已报告的部分"
-        >
-          <small>中断请求消耗</small>
-          <strong className="usage-interrupted">
-            {s?.interruptedRequests ?? 0} 次
-            {s?.interruptedRequests
-              ? ` · ${compact(s.interruptedTokens)} tokens · ${money(s.interruptedCost)}`
-              : ''}
-          </strong>
-          <small>
-            网关检测 · 客户端 {s?.interruptionCounts.client ?? 0} · 超时{' '}
-            {s?.interruptionCounts.timeout ?? 0} · 上游 {s?.interruptionCounts.upstream ?? 0} · 退出{' '}
-            {s?.interruptionCounts.shutdown ?? 0} · 已报告用量 {s?.interruptedReported ?? 0} /{' '}
-            {s?.interruptedRequests ?? 0}
-          </small>
-        </div>
-      </div>
-      <UsageHeatmap data={calendar} />
       <div className="usage-trend">
         <div className="usage-trend-heading">
           <h3>使用趋势</h3>

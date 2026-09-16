@@ -7,6 +7,7 @@ export interface TokenUsage {
 }
 export type UsageProtocol = 'responses' | 'chat-completions' | 'messages'
 export interface UsageQuery {
+  allHistory?: boolean
   start: number
   end: number
   bucketMs: number
@@ -28,7 +29,15 @@ export interface UsageTotals extends TokenUsage {
   cacheHitRate: number | null
 }
 export interface UsageStats {
-  byAccount: { accountId: string; averageTokensPerSecond: number | null; speedSamples: number }[]
+  byAccount: {
+    period: 'peak' | 'off-peak'
+    averageFirstTokenMs: number | null
+    firstTokenSamples: number
+    accountId: string
+    model: string
+    averageTokensPerSecond: number | null
+    speedSamples: number
+  }[]
   byModel: (UsageTotals & { model: string })[]
   summary: UsageTotals
   points: (UsageTotals & { time: number })[]
@@ -44,8 +53,10 @@ export function heatmapRange(now = Date.now()): { start: number; end: number } {
   const end = new Date(now)
   end.setHours(0, 0, 0, 0)
   end.setDate(end.getDate() + 1)
-  const start = new Date(end)
-  start.setDate(start.getDate() - 112)
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  start.setDate(1)
+  start.setMonth(start.getMonth() - 11)
   return { start: start.getTime(), end: end.getTime() }
 }
 export function heatmapLevel(tokens: number | null, maximum: number): number {

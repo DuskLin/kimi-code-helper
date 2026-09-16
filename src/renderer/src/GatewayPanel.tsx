@@ -15,6 +15,7 @@ import {
   ArrowUpRight,
   Check,
   Copy,
+  Code2,
   Play,
   Plus,
   RotateCcw,
@@ -36,15 +37,144 @@ import type {
   RequestHistoryPage
 } from '../../shared/contracts'
 
-import { DEFAULT_ACCOUNT_CONCURRENCY, kimiBaseUrl } from '../../shared/contracts'
+import { DEFAULT_ACCOUNT_CONCURRENCY, accountBaseUrl } from '../../shared/contracts'
 import { remainingRatio } from '../../shared/kimi-quota'
+import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
 
 import { OverlayScrollArea } from './OverlayScrollArea'
 import { KimiLogo } from './KimiLogo'
+import deepseekLogo from './assets/deepseek.svg'
 import { UsageDashboard } from './UsageDashboard'
 import type { UsageStats } from '../../shared/usage'
 
 const api = window.kimiHelper
+const peakPeriodHint =
+  '北京时间：周一至周五 09:00–12:00、14:00–18:00 为峰期，其余为谷期；按请求开始时间归类'
+function AccountPerformance({ stats }: { stats: UsageStats['byAccount'] }) {
+  const models = [...new Set(stats.map((item) => item.model))]
+  return (
+    <section className="account-performance" aria-label="按模型峰谷性能">
+      <div className="account-performance-heading">
+        <span>模型表现</span>
+        <span title={peakPeriodHint}>今日 · 峰谷分时</span>
+      </div>
+      {models.length ? (
+        models.map((model) => (
+          <div className="model-performance" key={model}>
+            <div className="model-performance-name" title={model}>
+              {model}
+            </div>
+            <table className="model-performance-table" aria-label={`${model} 峰谷表现`}>
+              <thead>
+                <tr>
+                  <th scope="col">指标</th>
+                  <th scope="col" title={peakPeriodHint}>
+                    谷期
+                  </th>
+                  <th scope="col" title={peakPeriodHint}>
+                    峰期
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {(['firstToken', 'speed'] as const).map((metric) => (
+                  <tr key={metric}>
+                    <th scope="row">{metric === 'firstToken' ? '平均首 token' : '平均生成速度'}</th>
+                    {(['off-peak', 'peak'] as const).map((period) => {
+                      const sample = stats.find(
+                        (item) => item.model === model && item.period === period
+                      )
+                      const value =
+                        metric === 'firstToken'
+                          ? sample?.averageFirstTokenMs
+                          : sample?.averageTokensPerSecond
+                      const count =
+                        metric === 'firstToken' ? sample?.firstTokenSamples : sample?.speedSamples
+                      const formula =
+                        metric === 'firstToken'
+                          ? '成功且未中断请求的首 token 耗时算术平均，包含重试等待'
+                          : '总输出 token ÷ 总上游流式时长（含首字等待）'
+                      return (
+                        <td
+                          key={period}
+                          title={`${period === 'peak' ? '峰期' : '谷期'} · ${count ?? 0} 个有效请求；${formula}`}
+                        >
+                          {value == null
+                            ? '—'
+                            : metric === 'firstToken'
+                              ? formatLatency(value)
+                              : `${value.toFixed(1)} tokens/s`}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))
+      ) : (
+        <p className="model-performance-empty">
+          平均首 token / 生成速度 <span>—</span>
+        </p>
+      )}
+    </section>
+  )
+}
+function ProviderLogo({ provider }: { provider?: AccountInput['provider'] }) {
+  if (provider === 'opencode-go')
+    return <Code2 className="opencode-go-logo" size={23} aria-label="OpenCode Go" />
+  return provider === 'deepseek' ? (
+    <img className="deepseek-logo" src={deepseekLogo} alt="DeepSeek" />
+  ) : (
+    <KimiLogo />
+  )
+}
+function BalanceDetails({
+  capabilities,
+  loading = false,
+  compact = false
+}: {
+  capabilities?: AccountCapabilities | null
+  loading?: boolean
+  compact?: boolean
+}) {
+  if (compact) {
+    return (
+      <>
+        <span>按量付费余额</span>
+        {capabilities?.balance ? (
+          capabilities.balance.balances.map((entry, index) => (
+            <small key={`${entry.currency}-${index}`}>
+              {entry.currency} {entry.balance.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}
+            </small>
+          ))
+        ) : (
+          <small>暂未获取余额</small>
+        )}
+      </>
+    )
+  }
+  return (
+    <div className="quota-details" aria-label="DeepSeek 余额">
+      <strong>按量付费余额</strong>
+      {loading ? (
+        <p>正在获取…</p>
+      ) : capabilities?.balance ? (
+        <>
+          {capabilities.balance.balances.map((entry, index) => (
+            <p key={`${entry.currency}-${index}`}>
+              {entry.currency} {entry.balance.toLocaleString('zh-CN', { maximumFractionDigits: 8 })}
+            </p>
+          ))}
+          {!capabilities.balance.available && <p className="warning">余额不足，暂不可调度</p>}
+        </>
+      ) : (
+        <p className="muted">暂未获取余额</p>
+      )}
+    </div>
+  )
+}
 const formatLatency = (ms: number | null | undefined): string =>
   ms == null ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
 const errorText = (error: unknown) =>
@@ -56,6 +186,7 @@ function accountStatus(a: AccountView): { text: string; className: string } {
   if (!a.enabled) return { text: '已停用', className: 'muted' }
   if (!a.capabilities) return { text: '待同步上游', className: 'warning' }
   if (!a.models.length) return { text: '上游暂无模型', className: 'warning' }
+  if (a.capabilities.balance?.available === false) return { text: '余额不足', className: 'warning' }
   if (a.runtime.authFailed) return { text: '需重新认证', className: 'danger' }
   if (a.runtime.cooldownUntil > Date.now())
     return {
@@ -64,17 +195,21 @@ function accountStatus(a: AccountView): { text: string; className: string } {
     }
   if (a.runtime.active >= a.maxConcurrency) return { text: '满载', className: 'warning' }
   if (
-    [a.capabilities.quota?.fiveHour, a.capabilities.quota?.weekly].some(
-      (window) => remainingRatio(window, a.capabilities!.checkedAt, Date.now()) === 0
-    )
+    [
+      a.capabilities.quota?.fiveHour,
+      a.capabilities.quota?.weekly,
+      a.capabilities.quota?.monthly
+    ].some((window) => remainingRatio(window, a.capabilities!.checkedAt, Date.now()) === 0)
   )
     return { text: '额度耗尽', className: 'warning' }
   return { text: a.runtime.active ? '处理中' : '可调度', className: 'healthy' }
 }
-function quotaRemaining(window: QuotaWindow | null | undefined): string {
+function quotaRemaining(window: QuotaWindow | null | undefined, unit?: 'percent'): string {
   const format = (value: number | null | undefined) =>
     value == null ? '—' : value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
-  return `${format(window?.remaining)} / ${format(window?.limit)}`
+  return unit === 'percent'
+    ? `${format(window?.remaining)}%`
+    : `${format(window?.remaining)} / ${format(window?.limit)}`
 }
 function compactReset(value: string): string {
   const date = new Date(value)
@@ -116,7 +251,10 @@ function QuotaDetails({
         {(
           [
             [overview ? '5h 剩余额度' : '5 小时额度', quota?.fiveHour],
-            [overview ? '7D 剩余额度' : '7 天额度', quota?.weekly]
+            [overview ? '7D 剩余额度' : '7 天额度', quota?.weekly],
+            ...(quota?.monthly !== undefined
+              ? [[overview ? '月 剩余额度' : '月额度', quota.monthly] as const]
+              : [])
           ] as const
         ).map(([label, window]) => {
           const amount = overview ? window?.remaining : window?.used
@@ -128,11 +266,14 @@ function QuotaDetails({
             <div className="quota-window" key={label}>
               <strong>{overview ? label.split(' ')[0] : label}</strong>
               {overview && (
-                <b className="remaining-percent" title={`剩余 ${quotaRemaining(window)}`}>
+                <b
+                  className="remaining-percent"
+                  title={`剩余 ${quotaRemaining(window, quota?.unit)}`}
+                >
                   {percent === null ? '—' : `${Number(percent.toFixed(1))}%`}
                 </b>
               )}
-              {!overview && <span>剩余 {quotaRemaining(window)}</span>}
+              {!overview && <span>剩余 {quotaRemaining(window, quota?.unit)}</span>}
               {percent !== null && (
                 <progress
                   aria-label={`${label}${overview ? '比例' : '已用比例'}`}
@@ -223,6 +364,7 @@ export function GatewayPanel({
 }) {
   const [snapshot, setSnapshot] = useState<GatewaySnapshot>()
   const [accountSpeeds, setAccountSpeeds] = useState<UsageStats['byAccount']>([])
+  const [usageRefreshInterval, setUsageRefreshInterval] = useState(5000)
   const [page, setPage] = useState<'overview' | 'management'>('overview')
   const [tab, setTab] = useState<'accounts' | 'activity'>('accounts')
   const [history, setHistory] = useState<RequestHistoryPage>()
@@ -371,6 +513,21 @@ export function GatewayPanel({
         )}
         <div className="toolbar">
           {page === 'overview' && (
+            <button
+              className="usage-refresh"
+              aria-label="切换自动刷新间隔"
+              title={`每 ${usageRefreshInterval / 1000} 秒自动刷新，点击切换为 ${usageRefreshInterval === 5000 ? 15 : usageRefreshInterval === 15000 ? 30 : 5} 秒`}
+              onClick={() =>
+                setUsageRefreshInterval((value) =>
+                  value === 5000 ? 15000 : value === 15000 ? 30000 : 5000
+                )
+              }
+            >
+              <RotateCcw size={14} />
+              <span>{usageRefreshInterval / 1000}s</span>
+            </button>
+          )}
+          {page === 'overview' && (
             <button className="button" onClick={() => setPage('management')}>
               <Users size={15} />
               账号管理
@@ -415,7 +572,7 @@ export function GatewayPanel({
           {!linkedAccounts.length ? (
             <div className="quota-overview-empty">
               <Users size={24} />
-              <p>关联 Kimi 账号后，这里会展示每个账号的 5h 和 7D 剩余额度。</p>
+              <p>关联账号后，这里会展示 Kimi、OpenCode Go 剩余额度和 DeepSeek 余额。</p>
               <button className="text-button" onClick={() => setPage('management')}>
                 前往账号管理
                 <ArrowUpRight size={14} />
@@ -425,7 +582,7 @@ export function GatewayPanel({
             <div className="overview-quota-grid">
               {linkedAccounts.map((account) => {
                 const status = accountStatus(account)
-                const speed = accountSpeeds.find((item) => item.accountId === account.id)
+                const speeds = accountSpeeds.filter((item) => item.accountId === account.id)
                 return (
                   <article
                     key={account.id}
@@ -435,7 +592,7 @@ export function GatewayPanel({
                     <div className="overview-account-heading">
                       <div className="account-name">
                         <span className="account-avatar">
-                          <KimiLogo />
+                          <ProviderLogo provider={account.provider} />
                         </span>
                         <div>
                           <strong>{account.name}</strong>
@@ -470,18 +627,12 @@ export function GatewayPanel({
                         </button>
                       </div>
                     </div>
-                    <QuotaDetails quota={account.capabilities?.quota} loading={false} overview />
-                    <div
-                      className="account-speed"
-                      title={`当天 ${speed?.speedSamples ?? 0} 个有效流式请求；总输出 token ÷ 总上游流式时长（含首字等待）`}
-                    >
-                      <span>平均生成速度</span>
-                      <strong>
-                        {speed?.averageTokensPerSecond == null
-                          ? '—'
-                          : `${speed.averageTokensPerSecond.toFixed(1)} tokens/s`}
-                      </strong>
-                    </div>
+                    {account.provider === 'deepseek' ? (
+                      <BalanceDetails capabilities={account.capabilities} />
+                    ) : (
+                      <QuotaDetails quota={account.capabilities?.quota} loading={false} overview />
+                    )}
+                    <AccountPerformance stats={speeds} />
                   </article>
                 )
               })}
@@ -489,7 +640,9 @@ export function GatewayPanel({
           )}
         </section>
       )}
-      {page === 'overview' && <UsageDashboard onAccountStats={setAccountSpeeds} />}
+      {page === 'overview' && (
+        <UsageDashboard interval={usageRefreshInterval} onAccountStats={setAccountSpeeds} />
+      )}
       {page === 'management' && (
         <section aria-label="账号管理">
           <div className="content-panel">
@@ -547,7 +700,8 @@ export function GatewayPanel({
                   <p>
                     Claude Code：在终端中执行复制的「Claude
                     配置」，然后启动客户端。其他客户端使用上方地址与网关密钥；Anthropic Base URL
-                    去掉末尾 /v1。默认模型为 kimi-for-coding。
+                    去掉末尾 /v1。Kimi 默认模型为 kimi-for-coding；使用 DeepSeek
+                    时请将客户端模型改为同步列表中的 DeepSeek 模型。
                   </p>
                 </details>
                 {!accounts.length ? (
@@ -555,15 +709,15 @@ export function GatewayPanel({
                     <div className="empty-icon">
                       <Users size={26} />
                     </div>
-                    <h2>添加第一个 Kimi 账号</h2>
+                    <h2>添加第一个账号</h2>
                     <p>
-                      填写 Kimi Code API Key 即可接入。
+                      填写 Kimi Code、DeepSeek 或 OpenCode Go API Key 即可接入。
                       <br />
                       添加多个账号后，网关将自动均衡分配请求。
                     </p>
                     <button className="button" onClick={() => setAccountEdit(newAccount())}>
                       <Plus size={15} />
-                      添加 Kimi 账号
+                      添加第一个账号
                     </button>
                   </div>
                 ) : (
@@ -574,7 +728,7 @@ export function GatewayPanel({
                           <th>账号</th>
                           <th>状态</th>
                           <th>并发</th>
-                          <th>额度（剩余 / 总额）</th>
+                          <th>额度 / 余额</th>
                           <th>成功 / 失败</th>
                           <th className="align-right">操作</th>
                         </tr>
@@ -587,12 +741,16 @@ export function GatewayPanel({
                               <td>
                                 <div className="account-name">
                                   <span className="account-avatar">
-                                    <KimiLogo />
+                                    <ProviderLogo provider={account.provider} />
                                   </span>
                                   <div>
                                     <strong>{account.name}</strong>
                                     <small>
-                                      API Key · {account.region === 'global' ? '国际区' : '中国区'}
+                                      {account.provider === 'opencode-go'
+                                        ? 'OpenCode Go · 订阅'
+                                        : account.provider === 'deepseek'
+                                          ? 'DeepSeek · 按量付费'
+                                          : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
                                     </small>
                                   </div>
                                 </div>
@@ -639,12 +797,35 @@ export function GatewayPanel({
                                     : '尚未同步'
                                 }
                               >
-                                <span>
-                                  5 小时 {quotaRemaining(account.capabilities?.quota?.fiveHour)}
-                                </span>
-                                <small>
-                                  7 天 {quotaRemaining(account.capabilities?.quota?.weekly)}
-                                </small>
+                                {account.provider === 'deepseek' ? (
+                                  <BalanceDetails capabilities={account.capabilities} compact />
+                                ) : (
+                                  <>
+                                    <span>
+                                      5 小时{' '}
+                                      {quotaRemaining(
+                                        account.capabilities?.quota?.fiveHour,
+                                        account.capabilities?.quota?.unit
+                                      )}
+                                    </span>
+                                    <small>
+                                      7 天{' '}
+                                      {quotaRemaining(
+                                        account.capabilities?.quota?.weekly,
+                                        account.capabilities?.quota?.unit
+                                      )}
+                                    </small>
+                                    {account.provider === 'opencode-go' && (
+                                      <small>
+                                        月{' '}
+                                        {quotaRemaining(
+                                          account.capabilities?.quota?.monthly,
+                                          'percent'
+                                        )}
+                                      </small>
+                                    )}
+                                  </>
+                                )}
                               </td>
                               <td>
                                 {account.runtime.successes}{' '}
@@ -889,13 +1070,17 @@ function AccountEditor({
   const probeVersion = useRef(0)
   const lock = useRef(false)
   const change = <K extends keyof AccountInput>(key: K, value: AccountInput[K]) => {
-    if (key === 'secret' || key === 'region') {
+    if (key === 'secret' || key === 'region' || key === 'provider') {
       probeVersion.current++
       setCapabilities(null)
       setReading(false)
       setProbeError('')
     }
-    setDraft((d) => ({ ...d, [key]: value }))
+    setDraft((d) => ({
+      ...d,
+      ...(key === 'provider' ? { secret: '', modelProtocols: {} } : {}),
+      [key]: value
+    }))
   }
   async function inspect() {
     const version = ++probeVersion.current
@@ -904,6 +1089,7 @@ function AccountEditor({
     try {
       const result = await api.inspectAccount({
         id: draft.id,
+        provider: draft.provider,
         region: draft.region,
         secret: draft.secret
       })
@@ -935,7 +1121,7 @@ function AccountEditor({
     }
   }
   return (
-    <Modal title={input.id ? '编辑 Kimi 账号' : '添加 Kimi 账号'} close={close}>
+    <Modal title={input.id ? '编辑账号' : '添加账号'} close={close}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -953,28 +1139,44 @@ function AccountEditor({
               autoFocus
             />
           </Field>
-          <Field label="账号区域">
+          <Field label="供应商">
             <select
-              value={draft.region}
-              onChange={(e) => change('region', e.target.value as AccountInput['region'])}
+              value={draft.provider ?? 'kimi'}
+              onChange={(e) => change('provider', e.target.value as AccountInput['provider'])}
             >
-              <option value="mainland-cn">中国区 · kimi.com</option>
-              <option value="global">国际区 · kimi.ai</option>
+              <option value="kimi">Kimi Code</option>
+              <option value="deepseek">DeepSeek · 按量付费</option>
+              <option value="opencode-go">OpenCode Go · 订阅</option>
             </select>
           </Field>
+          {(draft.provider ?? 'kimi') === 'kimi' && (
+            <Field label="账号区域">
+              <select
+                value={draft.region}
+                onChange={(e) => change('region', e.target.value as AccountInput['region'])}
+              >
+                <option value="mainland-cn">中国区 · kimi.com</option>
+                <option value="global">国际区 · kimi.ai</option>
+              </select>
+            </Field>
+          )}
           <Field
             label="API Key"
             hint={
               input.id
                 ? '留空保留现有密钥；尚未配置的账号须先填写密钥。'
-                : '填写 Kimi Code 控制台生成的密钥。'
+                : draft.provider === 'opencode-go'
+                  ? '填写已订阅 Go 的 OpenCode API Key。'
+                  : draft.provider === 'deepseek'
+                    ? '填写 DeepSeek 开放平台生成的密钥。'
+                    : '填写 Kimi Code 控制台生成的密钥。'
             }
           >
             <input
               type="password"
               autoComplete="new-password"
               value={draft.secret ?? ''}
-              required={!input.id}
+              required={!input.id || (draft.provider ?? 'kimi') !== (input.provider ?? 'kimi')}
               placeholder={input.id ? '留空保留现有密钥' : 'sk-…'}
               onChange={(e) => change('secret', e.target.value)}
               onBlur={() => {
@@ -982,8 +1184,8 @@ function AccountEditor({
               }}
             />
           </Field>
-          <Field label="上游 Base URL" hint="由账号区域自动确定，不可修改。">
-            <input type="url" readOnly value={kimiBaseUrl(draft.region)} />
+          <Field label="上游 Base URL" hint="由供应商和区域自动确定，转发时按协议选择端点。">
+            <input type="url" readOnly value={accountBaseUrl(draft.region, draft.provider)} />
           </Field>
           <div className="form-grid">
             <Field
@@ -1007,19 +1209,6 @@ function AccountEditor({
                       DEFAULT_ACCOUNT_CONCURRENCY)
                 }
                 onChange={(event) => change('concurrencyOverride', event.target.valueAsNumber)}
-              />
-            </Field>
-            <Field label="可用模型" hint="自动同步上游模型列表，不可手动修改。">
-              <textarea
-                readOnly
-                rows={3}
-                value={
-                  reading
-                    ? '正在获取…'
-                    : capabilities
-                      ? capabilities.models.join('\n') || '上游暂无可用模型'
-                      : '填写 API Key 后自动获取'
-                }
               />
             </Field>
           </div>
@@ -1053,7 +1242,83 @@ function AccountEditor({
               <small>已同步 {new Date(capabilities.checkedAt).toLocaleTimeString()}</small>
             )}
           </div>
-          <QuotaDetails quota={capabilities?.quota} loading={reading} />
+          <section className="model-protocols">
+            <div className="model-protocols-heading">
+              <strong>可用模型</strong>
+              {!!Object.keys(draft.modelProtocols ?? {}).length && (
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => change('modelProtocols', {})}
+                >
+                  恢复默认协议
+                </button>
+              )}
+            </div>
+            <p className="model-protocols-hint">
+              勾选模型在此账号上原生支持的
+              API，至少选择一项。优先同协议调用，其他入口自动转换；刷新不会覆盖选择。
+            </p>
+            {reading ? (
+              <p className="muted" role="status">
+                正在获取…
+              </p>
+            ) : capabilities?.models.length ? (
+              <div className="model-protocol-list">
+                <table aria-label="可用模型">
+                  <thead>
+                    <tr>
+                      <th scope="col">模型名</th>
+                      {MODEL_PROTOCOLS.map((p) => (
+                        <th scope="col" key={p.value}>
+                          {p.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {capabilities.models.map((model) => {
+                      const selected = supportedModelProtocols(draft, model)
+                      return (
+                        <tr key={model}>
+                          <th scope="row" title={model}>
+                            {model}
+                          </th>
+                          {MODEL_PROTOCOLS.map((p) => (
+                            <td key={p.value}>
+                              <input
+                                type="checkbox"
+                                aria-label={`${model} ${p.label}`}
+                                checked={selected.includes(p.value)}
+                                onChange={(event) => {
+                                  const next = event.target.checked
+                                    ? [...selected, p.value]
+                                    : selected.filter((value) => value !== p.value)
+                                  change('modelProtocols', {
+                                    ...draft.modelProtocols,
+                                    [model]: next
+                                  })
+                                }}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted">
+                {capabilities ? '上游暂无可用模型' : '填写 API Key 后自动获取'}
+              </p>
+            )}
+          </section>
+          {draft.provider === 'deepseek' ? (
+            <BalanceDetails capabilities={capabilities} loading={reading} />
+          ) : (
+            <QuotaDetails quota={capabilities?.quota} loading={reading} />
+          )}
           {capabilities?.warning && (
             <p className="metadata-warning">
               {capabilityWarning(capabilities, draft.concurrencyOverride)}

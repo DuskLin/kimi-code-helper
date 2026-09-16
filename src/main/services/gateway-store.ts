@@ -2,9 +2,12 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { storedQuota } from '../../shared/kimi-quota'
+import { storedBalance } from '../../shared/deepseek-balance'
 import {
   DEFAULT_ACCOUNT_CONCURRENCY,
-  kimiBaseUrl,
+  accountBaseUrl,
+  type Provider,
+  type ModelProtocol,
   type AccountCapabilities,
   type AccountInput,
   type GatewaySettings,
@@ -79,6 +82,7 @@ export function validateGroup(value: unknown): GroupInput {
 }
 export function validateAccount(value: unknown, groups: StoredGroup[]): AccountInput {
   const v = object(value)
+  const provider = validateProvider(v.provider)
   if (v.kind !== 'api-key') throw new Error('仅支持 API Key 接入')
   if (!['mainland-cn', 'global'].includes(v.region as string)) throw new Error('账号区域无效')
   if (
@@ -106,6 +110,10 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
     ...(v.id !== undefined ? { id: string(v.id, '账号 ID') } : {}),
     name: string(v.name, '账号名称'),
     kind: 'api-key',
+    provider,
+    ...(v.modelProtocols !== undefined
+      ? { modelProtocols: validateModelProtocols(v.modelProtocols) }
+      : {}),
     region: v.region as AccountInput['region'],
     enabled: boolean(v.enabled),
     ...(v.concurrencyOverride !== undefined
@@ -121,10 +129,36 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
   }
 }
 
+export function validateProvider(value: unknown): Provider {
+  if (value === undefined) return 'kimi'
+  if (value !== 'kimi' && value !== 'deepseek' && value !== 'opencode-go')
+    throw new Error('账号供应商无效')
+  return value
+}
+export function validateModelProtocols(value: unknown): Record<string, ModelProtocol[]> {
+  const entries = Object.entries(object(value))
+  if (entries.length > 2000) throw new Error('模型协议配置过多')
+  return Object.fromEntries(
+    entries.map(([model, protocols]) => {
+      if (string(model, '模型', 200) !== model) throw new Error('模型名称不能包含首尾空格')
+      if (
+        !Array.isArray(protocols) ||
+        !protocols.length ||
+        protocols.length > 3 ||
+        new Set(protocols).size !== protocols.length ||
+        protocols.some((p) => !['messages', 'responses', 'chat-completions'].includes(p))
+      )
+        throw new Error(`模型 ${model} 须选择至少一种有效 API，且不能重复`)
+      return [model, protocols as ModelProtocol[]]
+    })
+  )
+}
+
 export function capabilityFields(
   region: AccountInput['region'],
   value: unknown,
-  concurrencyOverride: number | null = null
+  concurrencyOverride: number | null = null,
+  provider: Provider = 'kimi'
 ) {
   if (concurrencyOverride !== null) integer(concurrencyOverride, 1, 1000, '手动并发上限')
   let capabilities: AccountCapabilities | null = null
@@ -148,11 +182,12 @@ export function capabilityFields(
                 `未获取到并发上限，使用默认 ${DEFAULT_ACCOUNT_CONCURRENCY} 个并发调度`
               )
           : '',
-      ...(data.quota !== undefined ? { quota: storedQuota(data.quota) } : {})
+      ...(data.quota !== undefined ? { quota: storedQuota(data.quota) } : {}),
+      ...(data.balance !== undefined ? { balance: storedBalance(data.balance) } : {})
     }
   }
   return {
-    baseUrl: kimiBaseUrl(region),
+    baseUrl: accountBaseUrl(region, provider),
     models: capabilities?.models ?? [],
     maxConcurrency:
       concurrencyOverride ?? capabilities?.maxConcurrency ?? DEFAULT_ACCOUNT_CONCURRENCY,
@@ -240,7 +275,8 @@ export class GatewayStore {
           ...capabilityFields(
             input.region,
             legacy ? null : item.capabilities,
-            input.concurrencyOverride
+            input.concurrencyOverride,
+            input.provider
           ),
           id: string(item.id, '账号 ID'),
           credential: {
@@ -306,15 +342,22 @@ export class GatewayStore {
       const { secret, ...input } = validateAccount(value, data.groups)
       const old = data.accounts.find((a) => a.id === input.id)
       if (input.id && !old) throw new Error('账号不存在')
+      if (old && old.provider !== input.provider && !secret)
+        throw new Error('切换供应商请填写新的 API Key')
       const nextCredential = secret ? { accessToken: secret } : old?.credential
       if (!nextCredential?.accessToken) throw new Error('请填写 API Key')
       if (expectedKey && nextCredential.accessToken !== expectedKey)
         throw new Error('账号凭据已变更，请重试')
       id = input.id ?? randomUUID()
       const unchanged =
-        old?.region === input.region && old.credential.accessToken === nextCredential.accessToken
+        old?.provider === input.provider &&
+        old?.region === input.region &&
+        old.credential.accessToken === nextCredential.accessToken
+      const modelProtocols =
+        input.modelProtocols ?? (old?.provider === input.provider ? old?.modelProtocols : undefined)
       const account: StoredAccount = {
         ...input,
+        ...(modelProtocols !== undefined ? { modelProtocols } : {}),
         id,
         credential: nextCredential,
         ...capabilityFields(
@@ -322,7 +365,8 @@ export class GatewayStore {
           capabilities ?? (unchanged ? old?.capabilities : null),
           input.concurrencyOverride === undefined
             ? old?.concurrencyOverride
-            : input.concurrencyOverride
+            : input.concurrencyOverride,
+          input.provider
         )
       }
       if (old) data.accounts[data.accounts.indexOf(old)] = account

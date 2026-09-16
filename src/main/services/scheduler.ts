@@ -62,6 +62,7 @@ export class Scheduler {
         !account.enabled ||
         !account.credential.accessToken ||
         !account.capabilities ||
+        account.capabilities.balance?.available === false ||
         excluded.has(account.id) ||
         state.authFailed ||
         state.cooldownUntil > now ||
@@ -79,7 +80,12 @@ export class Scheduler {
         account.capabilities.checkedAt,
         now
       )
-      if (fiveHour === 0 || weekly === 0) return []
+      const monthly = remainingRatio(
+        account.capabilities.quota?.monthly,
+        account.capabilities.checkedAt,
+        now
+      )
+      if (fiveHour === 0 || weekly === 0 || monthly === 0) return []
       return [{ account, state, fiveHour, weekly, score: 0 }]
     })
     if (!candidates.length) return
