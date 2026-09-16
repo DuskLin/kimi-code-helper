@@ -18,6 +18,121 @@ import { openCodeGoRoute } from '../src/shared/opencode-go'
 const protocols: UsageProtocol[] = ['chat-completions', 'messages', 'responses']
 const schema = { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }
 const inputImage = 'data:image/png;base64,aGVsbG8='
+function assertPairedTools(messages: Wire[]): void {
+  let pending = new Set<string>()
+  for (const message of messages) {
+    if (pending.size) {
+      assert.equal(
+        message.role,
+        'tool',
+        'tool_calls must be followed immediately by all tool results'
+      )
+      assert.ok(pending.delete(message.tool_call_id), 'tool result must match a pending call')
+    } else {
+      assert.notEqual(message.role, 'tool', 'orphan tool result')
+      if (message.tool_calls?.length)
+        pending = new Set(message.tool_calls.map((call: Wire) => call.id))
+    }
+  }
+  assert.equal(pending.size, 0, 'unanswered tool calls')
+}
+function parallelHistory(): Wire[] {
+  return [
+    { role: 'user', content: 'Read two files' },
+    { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Inspect both files first.' }] },
+    { role: 'assistant', content: 'Reading the files.' },
+    {
+      type: 'function_call',
+      call_id: 'parallel_a',
+      name: 'read_file',
+      arguments: '{"path":"a.ts"}'
+    },
+    {
+      type: 'function_call',
+      call_id: 'parallel_b',
+      name: 'read_file',
+      arguments: '{"path":"b.ts"}'
+    },
+    { role: 'developer', content: 'Approved command prefix saved' },
+    { type: 'function_call_output', call_id: 'parallel_b', output: 'B result' },
+    {
+      type: 'function_call_output',
+      call_id: 'parallel_a',
+      output: [
+        { type: 'input_text', text: 'A result' },
+        { type: 'input_image', image_url: inputImage }
+      ]
+    },
+    { role: 'user', content: 'Continue with both results' }
+  ]
+}
+
+test('Responses parallel tool history is one assistant turn followed by ordered complete replies before notices or media', () => {
+  const input = { ...request('responses'), model: 'deepseek-v4.1-flash', input: parallelHistory() }
+  const original = structuredClone(input)
+  const { body } = convertRequest(input, 'responses', 'chat-completions')
+  assertPairedTools(body.messages)
+  const index = body.messages.findIndex((m: Wire) => m.tool_calls?.length)
+  assert.equal(body.messages[index].content, 'Reading the files.')
+  assert.equal(body.messages[index].reasoning_content, 'Inspect both files first.')
+  assert.deepEqual(
+    body.messages[index].tool_calls.map((c: Wire) => c.id),
+    ['parallel_a', 'parallel_b']
+  )
+  assert.deepEqual(
+    body.messages.slice(index + 1, index + 3).map((m: Wire) => m.tool_call_id),
+    ['parallel_a', 'parallel_b']
+  )
+  assert.ok(JSON.stringify(body.messages[index + 3]).includes(inputImage))
+  assert.ok(JSON.stringify(body.messages).includes('Approved command prefix saved'))
+  assert.deepEqual(input, original)
+})
+
+test('Responses interrupted tools, orphan/duplicate outputs and reasoning replay across chained calls', () => {
+  const call = (id: string) => ({
+    type: 'function_call',
+    call_id: id,
+    name: 'read_file',
+    arguments: '{}'
+  })
+  const output = (id: string, text: string) => ({
+    type: 'function_call_output',
+    call_id: id,
+    output: text
+  })
+  const { body } = convertRequest(
+    {
+      model: 'deepseek-v4.1-flash',
+      input: [
+        { role: 'user', content: 'start' },
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'same-turn thinking' }] },
+        call('a'),
+        call('interrupted'),
+        output('a', 'old'),
+        output('a', 'latest'),
+        output('orphan', 'orphan result'),
+        call('b'),
+        output('b', 'B result'),
+        { role: 'user', content: 'new turn' },
+        call('c'),
+        output('c', 'C result')
+      ]
+    },
+    'responses',
+    'chat-completions'
+  )
+  assertPairedTools(body.messages)
+  const assistant = body.messages.filter((m: Wire) => m.tool_calls?.length)
+  assert.deepEqual(
+    assistant.map((m: Wire) => m.tool_calls.map((c: Wire) => c.id)),
+    [['a'], ['b'], ['c']]
+  )
+  assert.equal(assistant[0].reasoning_content, 'same-turn thinking')
+  assert.equal(assistant[1].reasoning_content, 'same-turn thinking')
+  assert.equal(assistant[2].reasoning_content, undefined)
+  assert.equal(body.messages.find((m: Wire) => m.tool_call_id === 'a').content, 'latest')
+  assert.ok(!JSON.stringify(body).includes('orphan result'))
+})
 function request(protocol: UsageProtocol): Wire {
   const common = { model: 'test-model', stream: true, temperature: 0.3 }
   if (protocol === 'chat-completions')
@@ -671,6 +786,23 @@ test('real HTTP gateway: all nine ingress/model combinations, JSON/SSE, headers,
       res.end('{"error":{"message":"wrong wire format"}}')
       return
     }
+    if (protocol === 'chat-completions') {
+      try {
+        assertPairedTools(body.messages)
+      } catch {
+        res.writeHead(400, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            error: {
+              type: 'invalid_request_error',
+              message:
+                "An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'."
+            }
+          })
+        )
+        return
+      }
+    }
     res.writeHead(200, {
       'content-type': body.stream ? 'text/event-stream' : 'application/json',
       'x-request-id': 'upstream-conversion-test'
@@ -702,7 +834,9 @@ test('real HTTP gateway: all nine ingress/model combinations, JSON/SSE, headers,
     async (url) =>
       String(url).endsWith('/models')
         ? Response.json({
-            data: ['glm-fixture', 'minimax-fixture', 'gpt-fixture'].map((id) => ({ id }))
+            data: ['glm-fixture', 'minimax-fixture', 'gpt-fixture', 'deepseek-v4.1-flash'].map(
+              (id) => ({ id })
+            )
           })
         : Response.json({
             usage: { rolling: { percent: 0 }, weekly: { percent: 0 }, monthly: { percent: 0 } }
@@ -782,6 +916,49 @@ test('real HTTP gateway: all nine ingress/model combinations, JSON/SSE, headers,
     assert.equal(bad.status, 400)
     await bad.text()
     assert.equal(calls.length, 18)
+    for (const streaming of [false, true]) {
+      const result = await fetch(base + '/v1/responses', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...request('responses'),
+          model: 'deepseek-v4.1-flash',
+          input: parallelHistory(),
+          stream: streaming
+        })
+      })
+      assert.equal(result.status, 200)
+      if (streaming) assert.match(await result.text(), /response.completed/)
+      else {
+        const response = await result.json()
+        assert.equal(response.status, 'completed')
+        // Replay actual converted reasoning/tool output as a Responses client would.
+        const replay = await fetch(base + '/v1/responses', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            ...request('responses'),
+            model: 'deepseek-v4.1-flash',
+            stream: false,
+            input: [
+              ...parallelHistory(),
+              ...response.output,
+              ...response.output
+                .filter((item: Wire) => item.type === 'function_call')
+                .map((item: Wire) => ({
+                  type: 'function_call_output',
+                  call_id: item.call_id,
+                  output: 'completed'
+                }))
+            ]
+          })
+        })
+        assert.equal(replay.status, 200)
+        assert.equal((await replay.json()).status, 'completed')
+      }
+      assert.equal(calls.at(-1)!.path, '/zen/go/v1/chat/completions')
+      assertPairedTools(calls.at(-1)!.body.messages)
+    }
     const history = gateway.history.page(100).records // latest records include converted requests.
     const recorded = history.find((r) => r.usage)
     assert.ok(recorded)
@@ -789,6 +966,23 @@ test('real HTTP gateway: all nine ingress/model combinations, JSON/SSE, headers,
     assert.equal(recorded.usage!.cacheRead, 20)
     assert.equal(recorded.usage!.cacheWrite, 10)
     assert.equal(recorded.upstreamRequestId, 'upstream-conversion-test')
+    const brokenBuffered = await fetch(base + '/v1/messages', {
+      method: 'POST',
+      headers: { ...headers, 'x-opencode-session': 'broken-test' },
+      body: JSON.stringify({
+        model: 'glm-fixture',
+        stream: false,
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'hi' }]
+      })
+    })
+    assert.equal(
+      brokenBuffered.status,
+      502,
+      'buffered conversion failure must return an HTTP error, not a premature 200'
+    )
+    assert.equal((await brokenBuffered.json()).type, 'error')
+    gateway.scheduler.reset(store.get().accounts[0].id)
     await assert.rejects(async () => {
       const broken = await fetch(base + '/v1/messages', {
         method: 'POST',

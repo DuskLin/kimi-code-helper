@@ -30,6 +30,7 @@ class ResponseBridge {
   private reason = 'stop'
   private sourceTypes = new Map<number, string>()
   private itemKeys = new Map<string, string>()
+  private pendingTools = new Map<string, { callId: string; arguments: string }>()
   private model: string
   private requestId?: string
   constructor(
@@ -107,7 +108,7 @@ class ResponseBridge {
           content: [],
           stop_reason: null,
           stop_sequence: null,
-          ...(this.usageFor('messages') ? { usage: this.usageFor('messages') } : {})
+          usage: { input_tokens: 0, output_tokens: 0, ...this.usageFor('messages') }
         }
       })
     else {
@@ -123,8 +124,11 @@ class ResponseBridge {
     try {
       const input = JSON.parse(b.value || '{}')
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error()
+      if (this.custom(b) && typeof input.input !== 'string')
+        throw new ProtocolError('上游 custom 工具缺少字符串 input 参数', 502)
       return input
-    } catch {
+    } catch (error) {
+      if (error instanceof ProtocolError) throw error
       throw new ProtocolError('上游工具参数不是有效 JSON 对象', 502)
     }
   }
@@ -384,6 +388,7 @@ class ResponseBridge {
   }
   private finish(reason = this.reason): void {
     if (this.finished) return
+    if (this.pendingTools.size) throw new ProtocolError('上游工具调用缺少名称', 502)
     this.reason = reason
     this.start()
     for (const block of this.blocks) this.close(block)
@@ -395,7 +400,7 @@ class ResponseBridge {
     } else if (this.target === 'messages') {
       this.event('message_delta', {
         delta: { stop_reason: this.stopReason(), stop_sequence: null },
-        ...(this.usageFor('messages') ? { usage: this.usageFor('messages') } : {})
+        usage: { output_tokens: 0, ...this.usageFor('messages') }
       })
       this.event('message_stop', {})
     } else {
@@ -526,6 +531,8 @@ class ResponseBridge {
               : 'stop'
       )
     } else {
+      if (root.status !== undefined && !['completed', 'incomplete'].includes(root.status))
+        throw badResponse()
       if (!Array.isArray(root.output)) throw badResponse()
       for (const [index, item] of list(root.output).entries())
         this.fullItem(item, str(item.id) || String(index))
@@ -561,10 +568,23 @@ class ResponseBridge {
         for (const tool of list(delta.tool_calls)) {
           const fn = obj(tool.function)
           const key = `tool:${tool.index ?? 0}`
-          if (!this.blocks.some((b) => b.key === key) && !fn.name) throw badResponse()
+          const pending = this.pendingTools.get(key)
+          if (!this.blocks.some((b) => b.key === key) && !fn.name) {
+            const buffered = pending ?? { callId: str(tool.id), arguments: '' }
+            buffered.callId = str(tool.id) || buffered.callId
+            this.retain(str(fn.arguments))
+            buffered.arguments += str(fn.arguments)
+            this.pendingTools.set(key, buffered)
+            if (this.pendingTools.size > 1024) throw badResponse()
+            continue
+          }
+          if (pending) {
+            this.pendingTools.delete(key)
+            this.size -= Buffer.byteLength(pending.arguments)
+          }
           this.append(
-            this.block(key, 'tool', { callId: tool.id, name: fn.name }),
-            str(fn.arguments)
+            this.block(key, 'tool', { callId: tool.id || pending?.callId, name: fn.name }),
+            (pending?.arguments ?? '') + str(fn.arguments)
           )
         }
         if (choice.finish_reason) this.reason = choice.finish_reason
@@ -606,14 +626,15 @@ class ResponseBridge {
         if (b) this.close(b)
       } else if (type === 'message_delta') {
         const reason = obj(root.delta).stop_reason
-        this.reason =
-          reason === 'max_tokens'
-            ? 'length'
-            : reason === 'tool_use'
-              ? 'tool_calls'
-              : reason === 'stop_sequence'
-                ? 'stop_sequence'
-                : 'stop'
+        if (reason)
+          this.reason =
+            reason === 'max_tokens'
+              ? 'length'
+              : reason === 'tool_use'
+                ? 'tool_calls'
+                : reason === 'stop_sequence'
+                  ? 'stop_sequence'
+                  : 'stop'
       } else if (type === 'message_stop') this.finish()
     } else {
       const key =
@@ -673,6 +694,8 @@ class ResponseBridge {
           this.error(str(obj(response.error).message))
           return
         }
+        if (response.status !== undefined && !['completed', 'incomplete'].includes(response.status))
+          throw badResponse()
         for (const [index, item] of list(response.output).entries())
           this.fullItem(item, str(item.id) || this.itemKeys.get(String(index)) || String(index))
         this.finish(
@@ -704,7 +727,7 @@ class ResponseBridge {
         content: this.blocks.map((b) => this.anthropicBlock(b)),
         stop_reason: this.stopReason(),
         stop_sequence: null,
-        ...(this.usageFor('messages') ? { usage: this.usageFor('messages') } : {}),
+        usage: { input_tokens: 0, output_tokens: 0, ...this.usageFor('messages') },
         ...(this.requestId ? { request_id: this.requestId } : {})
       }
     const tools = this.blocks.filter((b) => b.kind === 'tool')

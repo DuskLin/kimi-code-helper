@@ -573,8 +573,11 @@ export class Gateway {
               upstream.ok && payload.stream === true
                 ? 'text/event-stream; charset=utf-8'
                 : 'application/json'
-          res.writeHead(upstream.status, outgoing)
-          res.flushHeaders()
+          const bufferedConversion = !!converted && !(upstream.ok && payload.stream === true)
+          if (!bufferedConversion) {
+            res.writeHead(upstream.status, outgoing)
+            res.flushHeaders()
+          }
           // 同协议透传；跨协议在背压管线中转换。开始输出后不再重试。
           if (upstream.body) {
             const source = Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0])
@@ -640,7 +643,28 @@ export class Gateway {
                   firstTokenMs ??= Math.round(performance.now() - startedTick)
                 })
                 await pipeline(source, ids, convert, observer, res, { signal: controller.signal })
-              } else await pipeline(source, ids, convert, res, { signal: controller.signal })
+              } else {
+                // Do not commit HTTP 200 before a buffered conversion has actually succeeded.
+                const result = await pipeline(
+                  source,
+                  ids,
+                  convert,
+                  async (chunks: AsyncIterable<Buffer>) => {
+                    const buffers: Buffer[] = []
+                    let size = 0
+                    for await (const chunk of chunks) {
+                      size += chunk.length
+                      if (size > 16 * 1024 * 1024)
+                        throw new ProtocolError('协议转换响应超过 16 MB', 502)
+                      buffers.push(chunk)
+                    }
+                    return Buffer.concat(buffers)
+                  },
+                  { signal: controller.signal }
+                )
+                res.writeHead(upstream.status, outgoing)
+                res.end(result)
+              }
             } else if (upstream.ok && streaming) {
               const observer = new FirstTokenObserver(() => {
                 firstTokenMs ??= Math.round(performance.now() - startedTick)
@@ -649,7 +673,10 @@ export class Gateway {
             } else await pipeline(source, ids, res, { signal: controller.signal })
             if (upstream.ok && streaming && streamInspectable && !streamComplete)
               interruption ??= 'upstream_disconnect'
-          } else res.end()
+          } else {
+            if (bufferedConversion) throw new ProtocolError('上游返回空响应', 502)
+            res.end()
+          }
           if (interruption) {
             finalStatus = 502
             this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
@@ -660,6 +687,8 @@ export class Gateway {
           if (error instanceof ProtocolError && error.status === 400) throw error
           if (!disconnected && (!controller.signal.aborted || timedOut))
             this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
+          if (error instanceof ProtocolError && !res.headersSent && !controller.signal.aborted)
+            throw error
           if (res.headersSent) {
             if (!controller.signal.aborted) {
               upstreamStreamFailed = true

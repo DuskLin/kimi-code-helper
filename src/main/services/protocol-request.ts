@@ -1,4 +1,5 @@
 import type { UsageProtocol } from '../../shared/usage'
+import { createHash } from 'node:crypto'
 
 // Wire objects vary by protocol. Validate semantic fields at each boundary.
 export type Wire = Record<string, any>
@@ -46,6 +47,18 @@ interface Message {
 function required(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new ProtocolError(`${label}不能为空`)
   return value
+}
+// Same deterministic namespace flattening as sub2api: <=64 bytes, suffix = sha256[:4].
+function flattenNamespaceToolName(namespace: string, name: string): string {
+  const full = `${namespace}__${name}`
+  if (Buffer.byteLength(full) <= 64) return full
+  const suffix = `__${createHash('sha256').update(full).digest('hex').slice(0, 8)}`
+  let prefix = ''
+  for (const char of full) {
+    if (Buffer.byteLength(prefix + char) > 64 - suffix.length) break
+    prefix += char
+  }
+  return prefix + suffix
 }
 function argumentsObject(value: unknown): Wire {
   try {
@@ -164,19 +177,38 @@ function messagesFrom(body: Wire, protocol: UsageProtocol): Message[] {
     const input =
       typeof body.input === 'string' ? [{ role: 'user', content: body.input }] : body.input
     if (!Array.isArray(input)) throw new ProtocolError('Responses input 必须是字符串或数组')
+    let turnReasoning = ''
     for (const item of list(input)) {
-      if (item.type === 'reasoning') continue // encrypted reasoning cannot be replayed into a different provider.
+      if (item.type === 'reasoning') {
+        const summary = list(item.summary)
+          .map((part) => str(part.text))
+          .filter(Boolean)
+          .join('\n')
+        const content =
+          typeof item.content === 'string'
+            ? item.content
+            : list(item.content)
+                .map((part) => str(part.text))
+                .filter(Boolean)
+                .join('\n')
+        turnReasoning = summary || content || turnReasoning
+        continue // Opaque encrypted_content cannot be replayed; retain the actual reasoning text.
+      }
       if (item.type === 'item_reference')
         throw new ProtocolError('跨协议请求需要完整历史，不能使用 item_reference')
       if (item.type === 'function_call' || item.type === 'custom_tool_call') {
         out.push({
           role: 'assistant',
           content: [],
+          reasoning: turnReasoning,
           calls: [
             {
               id: required(item.call_id, 'call_id'),
               name: item.namespace
-                ? `${item.namespace}__${item.name}`
+                ? flattenNamespaceToolName(
+                    required(item.namespace, 'namespace'),
+                    required(item.name, '工具名称')
+                  )
                 : required(item.name, '工具名称'),
               arguments:
                 item.type === 'custom_tool_call'
@@ -191,8 +223,14 @@ function messagesFrom(body: Wire, protocol: UsageProtocol): Message[] {
           callId: required(item.call_id, 'call_id'),
           content: parts(item.output)
         })
-      } else if (item.role) out.push({ role: item.role, content: parts(item.content) })
-      else throw new ProtocolError(`跨协议暂不支持 Responses input 类型 ${str(item.type)}`)
+      } else if (item.role) {
+        if (item.role !== 'assistant') turnReasoning = ''
+        out.push({
+          role: item.role,
+          content: parts(item.content),
+          ...(item.role === 'assistant' && turnReasoning ? { reasoning: turnReasoning } : {})
+        })
+      } else throw new ProtocolError(`跨协议暂不支持 Responses input 类型 ${str(item.type)}`)
     }
     return out
   }
@@ -244,10 +282,71 @@ function messagesFrom(body: Wire, protocol: UsageProtocol): Message[] {
   return out
 }
 
+/** Match sub2api's tool-history normalization before sending to strict Chat upstreams. */
+function normalizeToolHistory(messages: Message[]): Message[] {
+  const merged: Message[] = []
+  for (const message of messages) {
+    const previous = merged.at(-1)
+    if (message.role === 'assistant' && previous?.role === 'assistant') {
+      previous.content.push(...message.content)
+      previous.calls!.push(...(message.calls ?? []))
+      previous.reasoning ||= message.reasoning
+    } else
+      merged.push({ ...message, content: [...message.content], calls: [...(message.calls ?? [])] })
+  }
+  const replies = new Map(
+    messages.filter((m) => m.role === 'tool' && m.callId).map((m) => [m.callId!, m])
+  )
+  const used = new Set<string>()
+  const out: Message[] = []
+  for (const message of merged) {
+    if (message.role === 'tool') continue // Paired replies are relocated below; orphan replies are omitted.
+    if (!message.calls?.length) {
+      out.push(message)
+      continue
+    }
+    const calls = message.calls.filter((call) => {
+      if (!replies.has(call.id) || used.has(call.id)) return false
+      used.add(call.id)
+      return true
+    })
+    if (!calls.length) {
+      if (message.content.length) out.push({ ...message, calls: [] })
+      continue // Do not invent a successful result for an interrupted/dangling tool call.
+    }
+    out.push({ ...message, calls }, ...calls.map((call) => replies.get(call.id)!))
+  }
+  return out
+}
+
+function normalizeChatInstructions(messages: Wire[]): Wire[] {
+  const out: Wire[] = []
+  let leading = true
+  for (const message of messages) {
+    if (message.role !== 'system') leading = false
+    if (message.role === 'system' && leading && out.length) {
+      const previous = out[0]
+      if (typeof previous.content === 'string' && typeof message.content === 'string')
+        previous.content = [previous.content, message.content].filter(Boolean).join('\n\n')
+      else
+        previous.content = [previous.content, message.content].flatMap((content) =>
+          typeof content === 'string' ? [{ type: 'text', text: content }] : content
+        )
+    } else out.push(message.role === 'system' && !leading ? { ...message, role: 'user' } : message)
+  }
+  return out
+}
+
 function messagesTo(messages: Message[], protocol: UsageProtocol): Wire {
   if (protocol === 'chat-completions') {
     const out: Wire[] = []
-    for (const m of messages) {
+    let pendingMedia: Part[] = []
+    const flushMedia = () => {
+      if (pendingMedia.length)
+        out.push({ role: 'user', content: contentFor(pendingMedia, protocol) })
+      pendingMedia = []
+    }
+    for (const m of normalizeToolHistory(messages)) {
       if (m.role === 'tool') {
         out.push({
           role: 'tool',
@@ -255,8 +354,10 @@ function messagesTo(messages: Message[], protocol: UsageProtocol): Wire {
           content: (m.error ? 'Tool error: ' : '') + textOf(m.content)
         })
         const media = m.content.filter((p) => p.type !== 'text')
-        if (media.length) out.push({ role: 'user', content: contentFor(media, protocol) })
+        if (media.length)
+          pendingMedia.push({ type: 'text', text: `Tool output media (${m.callId})` }, ...media)
       } else {
+        flushMedia()
         out.push({
           role: m.role === 'developer' ? 'system' : m.role,
           content: contentFor(m.content, protocol, m.role),
@@ -273,7 +374,8 @@ function messagesTo(messages: Message[], protocol: UsageProtocol): Wire {
         })
       }
     }
-    return { messages: out }
+    flushMedia()
+    return { messages: normalizeChatInstructions(out) }
   }
   if (protocol === 'responses') {
     const input: Wire[] = []
@@ -287,8 +389,12 @@ function messagesTo(messages: Message[], protocol: UsageProtocol): Wire {
         const media = m.content.filter((p) => p.type !== 'text')
         if (media.length) input.push({ role: 'user', content: contentFor(media, protocol) })
       } else {
-        if (m.content.length)
-          input.push({ role: m.role, content: contentFor(m.content, protocol, m.role) })
+        const content: Part[] =
+          m.role === 'assistant' && m.reasoning
+            ? [{ type: 'text', text: `<thinking>${m.reasoning}</thinking>` }, ...m.content]
+            : m.content
+        if (content.length)
+          input.push({ role: m.role, content: contentFor(content, protocol, m.role) })
         for (const c of m.calls ?? [])
           input.push({ type: 'function_call', call_id: c.id, name: c.name, arguments: c.arguments })
       }
@@ -303,7 +409,7 @@ function messagesTo(messages: Message[], protocol: UsageProtocol): Wire {
     if (previous?.role === role) previous.content.push(...blocks)
     else out.push({ role, content: blocks })
   }
-  for (const m of messages) {
+  for (const m of normalizeToolHistory(messages)) {
     if (m.role === 'system' || m.role === 'developer') {
       system.push(textOf(m.content))
       continue
@@ -351,7 +457,7 @@ function toolsFrom(body: Wire, protocol: UsageProtocol, context: BridgeContext):
     )
       throw new ProtocolError(`跨协议不支持上游托管工具 ${str(tool.type)}，请使用客户端函数工具`)
     const name = required(fn.name, '工具名称')
-    const mapped = namespace ? `${namespace}__${name}` : name
+    const mapped = namespace ? flattenNamespaceToolName(namespace, name) : name
     if (context.tools.has(mapped)) throw new ProtocolError('工具名称冲突')
     context.tools.set(mapped, { name, namespace, custom })
     out.push({
@@ -393,7 +499,7 @@ export function convertRequest(
   }
   for (const key of ['temperature', 'top_p'])
     if (body[key] !== undefined) converted[key] = body[key]
-  if (target === 'responses' && /^gpt-5/i.test(context.model)) {
+  if (target !== 'messages' && /^gpt-5/i.test(context.model)) {
     delete converted.temperature
     delete converted.top_p
   }
@@ -443,7 +549,9 @@ export function convertRequest(
     const c = obj(choice)
     const mode = typeof choice === 'string' ? choice : c.type
     const name = c.name ?? obj(c.function).name
-    const mapped = c.namespace ? `${c.namespace}__${name}` : name
+    const mapped = c.namespace
+      ? flattenNamespaceToolName(required(c.namespace, 'namespace'), required(name, '工具名称'))
+      : name
     if (name) {
       if (!context.tools.has(mapped)) throw new ProtocolError('tool_choice 引用未声明的工具')
       converted.tool_choice =
@@ -478,11 +586,17 @@ export function convertRequest(
     source === 'responses'
       ? obj(body.text).format
       : (body.response_format ?? obj(body.output_config).format)
-  if (format) {
+  if (format && obj(format).type !== 'text') {
     const f = obj(format)
     const normalized =
       f.type === 'json_schema' && f.json_schema ? { type: 'json_schema', ...obj(f.json_schema) } : f
-    if (target === 'responses') converted.text = { format: normalized }
+    if (target === 'responses')
+      converted.text = {
+        format:
+          normalized.type === 'json_schema'
+            ? { ...normalized, name: normalized.name ?? 'output' }
+            : normalized
+      }
     else if (target === 'chat-completions')
       converted.response_format =
         normalized.type === 'json_schema'
