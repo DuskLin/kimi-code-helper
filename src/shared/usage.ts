@@ -7,6 +7,7 @@ export interface TokenUsage {
 }
 export type UsageProtocol = 'responses' | 'chat-completions' | 'messages'
 export interface UsageQuery {
+  performanceByDay?: boolean
   allHistory?: boolean
   start: number
   end: number
@@ -40,6 +41,7 @@ export interface ActivitySummary {
 export interface UsageStats {
   activity?: ActivitySummary
   byAccount: {
+    day?: string
     period: 'peak' | 'off-peak'
     averageFirstTokenMs: number | null
     firstTokenSamples: number
@@ -58,6 +60,18 @@ export interface UsageStats {
 export function localDayKey(time: number): string {
   const date = new Date(time)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+export function performanceHistoryRange(now = Date.now()) {
+  const dayMs = 86400000
+  const offset = 8 * 3600000
+  const today = Math.floor((now + offset) / dayMs) * dayMs - offset
+  return {
+    start: today - 29 * dayMs,
+    end: now,
+    days: Array.from({ length: 30 }, (_, i) =>
+      new Date(today - i * dayMs + offset).toISOString().slice(0, 10)
+    )
+  }
 }
 export function heatmapRange(now = Date.now()): { start: number; end: number } {
   const end = new Date(now)

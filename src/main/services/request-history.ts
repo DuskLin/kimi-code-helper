@@ -5,10 +5,25 @@ import type { GatewaySnapshot, RequestHistoryPage, RequestRecord } from '../../s
 import type { UsageQuery, UsageStats, UsageTotals } from '../../shared/usage'
 import { requestCost } from '../../shared/request-cost'
 import { localDayKey, summarizeActivity } from '../../shared/usage'
+import type { QuotaCostCycle, QuotaCostEstimate, QuotaCycleQuery } from '../../shared/quota-cost'
+
+function cycleQuery(value: unknown): QuotaCycleQuery {
+  if (!value || typeof value !== 'object') throw new Error('周期查询无效')
+  const query = value as QuotaCycleQuery
+  if (
+    typeof query.accountId !== 'string' ||
+    !query.accountId ||
+    query.accountId.length > 200 ||
+    !['fiveHour', 'weekly'].includes(query.window)
+  )
+    throw new Error('周期查询无效')
+  return query
+}
 
 /** 永久保存请求摘要；按游标分页，避免将全部历史加载进内存。 */
 export class RequestHistory {
   private db: DatabaseSync
+  private quotaRecords = new Map<string, { start: number; end: number; records: RequestRecord[] }>()
   constructor(file: string) {
     mkdirSync(dirname(file), { recursive: true })
     this.db = new DatabaseSync(file)
@@ -16,20 +31,140 @@ export class RequestHistory {
     this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA synchronous=FULL;
+      CREATE TABLE IF NOT EXISTS quota_cost_cycles (
+        account_id TEXT NOT NULL,
+        window TEXT NOT NULL,
+        reset_at TEXT NOT NULL,
+        checked_at REAL NOT NULL,
+        amounts TEXT NOT NULL,
+        excluded INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, window, reset_at)
+      );
       CREATE TABLE IF NOT EXISTS requests (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         id TEXT NOT NULL UNIQUE,
         record TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS requests_time ON requests(json_extract(record, '$.time'));
+      CREATE INDEX IF NOT EXISTS requests_quota_usage ON requests(json_extract(record, '$.accountId'), json_extract(record, '$.time'));
       CREATE INDEX IF NOT EXISTS requests_model ON requests(json_extract(record, '$.model'));
       CREATE INDEX IF NOT EXISTS requests_account ON requests(COALESCE(json_extract(record, '$.accountId'), json_extract(record, '$.account')), json_extract(record, '$.account'));
     `)
+    if (
+      !this.db
+        .prepare('PRAGMA table_info(quota_cost_cycles)')
+        .all()
+        .some((row) => row.name === 'excluded')
+    )
+      this.db.exec('ALTER TABLE quota_cost_cycles ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0')
   }
   append(record: RequestRecord): void {
     this.db
       .prepare('INSERT INTO requests (id, record) VALUES (?, ?)')
       .run(record.id, JSON.stringify(record))
+    this.quotaRecords.clear()
+  }
+  quotaUsage(accountId: string, start: number, end: number): RequestRecord[] {
+    const key = `${accountId}:${start}`
+    const cached = this.quotaRecords.get(key)
+    if (cached?.start === start && cached.end === end) return cached.records
+    const records = this.db
+      .prepare(
+        "SELECT record FROM requests WHERE json_extract(record, '$.accountId') = ? AND json_extract(record, '$.time') >= ? AND json_extract(record, '$.time') <= ?"
+      )
+      .all(accountId, start, end)
+      .map((row) => JSON.parse(String(row.record)) as RequestRecord)
+    if (this.quotaRecords.size >= 100) this.quotaRecords.clear()
+    this.quotaRecords.set(key, { start, end, records })
+    return records
+  }
+  quotaAverages(
+    accountId: string,
+    window: 'fiveHour' | 'weekly',
+    resetAt: string | null | undefined,
+    checkedAt: number,
+    estimate: QuotaCostEstimate
+  ): NonNullable<QuotaCostEstimate['averages']> {
+    const valid =
+      estimate.amounts.length > 0 &&
+      estimate.amounts.every((amount) => Number.isFinite(amount.total) && amount.total > 0)
+    if (valid && resetAt && Number.isFinite(Date.parse(resetAt)) && Number.isFinite(checkedAt)) {
+      // One latest valid observation per cycle. Repeated refreshes must not increase its weight.
+      this.db
+        .prepare(
+          `
+        INSERT INTO quota_cost_cycles (account_id, window, reset_at, checked_at, amounts)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, window, reset_at) DO UPDATE SET
+          checked_at = excluded.checked_at, amounts = excluded.amounts
+        WHERE excluded.checked_at >= quota_cost_cycles.checked_at
+          AND (excluded.checked_at != quota_cost_cycles.checked_at OR excluded.amounts != quota_cost_cycles.amounts)
+      `
+        )
+        .run(
+          accountId,
+          window,
+          new Date(resetAt).toISOString(),
+          checkedAt,
+          JSON.stringify(estimate.amounts.map(({ currency, total }) => ({ currency, total })))
+        )
+    }
+    return this.db
+      .prepare(
+        `
+      SELECT json_extract(value, '$.currency') AS currency,
+             AVG(json_extract(value, '$.total')) AS total, COUNT(*) AS cycles
+      FROM quota_cost_cycles, json_each(quota_cost_cycles.amounts)
+      WHERE account_id = ? AND window = ? AND excluded = 0
+      GROUP BY currency ORDER BY currency
+    `
+      )
+      .all(accountId, window)
+      .map((row) => ({
+        currency: String(row.currency) as 'USD' | 'CNY',
+        total: Number(row.total),
+        cycles: Number(row.cycles)
+      }))
+  }
+  getQuotaCycles(value: unknown): QuotaCostCycle[] {
+    const query = cycleQuery(value)
+    return this.db
+      .prepare(
+        `
+      SELECT reset_at, checked_at, amounts, excluded FROM quota_cost_cycles
+      WHERE account_id = ? AND window = ? ORDER BY reset_at DESC
+    `
+      )
+      .all(query.accountId, query.window)
+      .map((row) => ({
+        resetAt: String(row.reset_at),
+        checkedAt: Number(row.checked_at),
+        excluded: row.excluded === 1,
+        amounts: JSON.parse(String(row.amounts)) as QuotaCostCycle['amounts']
+      }))
+  }
+  setQuotaCycleExcluded(value: unknown): void {
+    const query = cycleQuery(value)
+    const input = value as { resetAt?: unknown; excluded?: unknown }
+    if (
+      typeof input.resetAt !== 'string' ||
+      !Number.isFinite(Date.parse(input.resetAt)) ||
+      typeof input.excluded !== 'boolean'
+    )
+      throw new Error('周期排除设置无效')
+    const result = this.db
+      .prepare(
+        `
+      UPDATE quota_cost_cycles SET excluded = ? WHERE account_id = ? AND window = ? AND reset_at = ?
+    `
+      )
+      .run(
+        input.excluded ? 1 : 0,
+        query.accountId,
+        query.window,
+        new Date(input.resetAt).toISOString()
+      )
+    if (!result.changes) throw new Error('周期记录不存在，请刷新后重试')
   }
   page(before?: number): RequestHistoryPage {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 1))
@@ -254,6 +389,11 @@ export class RequestHistory {
       )
       .all(...values)
       .map((row) => ({ ...totals(row), model: String(row.model || '未知模型') }))
+    if (query.performanceByDay !== undefined && typeof query.performanceByDay !== 'boolean')
+      throw new Error('每日模型表现参数无效')
+    const performanceDay = query.performanceByDay
+      ? "date(json_extract(record, '$.time') / 1000, 'unixepoch', '+8 hours') AS day, "
+      : ''
     const firstTokenEligible =
       "json_extract(record, '$.status') >= 200 AND json_extract(record, '$.status') < 300 AND json_extract(record, '$.interruption') IS NULL AND json_type(record, '$.firstTokenMs') IN ('integer', 'real') AND json_extract(record, '$.firstTokenMs') >= 0"
     const weekday =
@@ -263,12 +403,13 @@ export class RequestHistory {
     const period = `CASE WHEN ${weekday} BETWEEN 1 AND 5 AND ((${hour} >= 9 AND ${hour} < 12) OR (${hour} >= 14 AND ${hour} < 18)) THEN 'peak' ELSE 'off-peak' END`
     const byAccount = this.db
       .prepare(
-        `SELECT json_extract(record, '$.accountId') AS accountId, COALESCE(NULLIF(json_extract(record, '$.model'), ''), '未知模型') AS model, ${period} AS period, AVG(CASE WHEN ${firstTokenEligible} THEN json_extract(record, '$.firstTokenMs') END) AS averageFirstTokenMs, COUNT(CASE WHEN ${firstTokenEligible} THEN 1 END) AS firstTokenSamples, ${aggregate} FROM requests ${where} AND json_extract(record, '$.accountId') IS NOT NULL GROUP BY accountId, model, period ORDER BY accountId, model, period`
+        `SELECT ${performanceDay}json_extract(record, '$.accountId') AS accountId, COALESCE(NULLIF(json_extract(record, '$.model'), ''), '未知模型') AS model, ${period} AS period, AVG(CASE WHEN ${firstTokenEligible} THEN json_extract(record, '$.firstTokenMs') END) AS averageFirstTokenMs, COUNT(CASE WHEN ${firstTokenEligible} THEN 1 END) AS firstTokenSamples, ${aggregate} FROM requests ${where} AND json_extract(record, '$.accountId') IS NOT NULL GROUP BY accountId, model, period${query.performanceByDay ? ', day' : ''} ORDER BY ${query.performanceByDay ? 'day DESC, ' : ''}accountId, model, period`
       )
       .all(...values)
       .map((row) => {
         const summary = totals(row)
         return {
+          ...(query.performanceByDay ? { day: String(row.day) } : {}),
           accountId: String(row.accountId),
           model: String(row.model),
           period: row.period === 'peak' ? ('peak' as const) : ('off-peak' as const),

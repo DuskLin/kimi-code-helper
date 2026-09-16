@@ -12,6 +12,9 @@ import {
 import { createPortal } from 'react-dom'
 import {
   CircleHelp,
+  List,
+  PanelsTopLeft,
+  Wrench,
   Activity,
   Coins,
   ArrowLeft,
@@ -50,6 +53,7 @@ import {
 } from '../../shared/model-pricing'
 import { useQuotaCardDrag } from './useQuotaCardDrag'
 import { requestCost, requestCostDetails } from '../../shared/request-cost'
+import type { QuotaCostCycle, QuotaCycleQuery } from '../../shared/quota-cost'
 import { remainingRatio } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
 
@@ -58,16 +62,44 @@ import { KimiLogo } from './KimiLogo'
 import deepseekLogo from './assets/deepseek.svg'
 import { UsageDashboard } from './UsageDashboard'
 import type { UsageStats } from '../../shared/usage'
+import { performanceHistoryRange } from '../../shared/usage'
 
 const api = window.kimiHelper
+const cardDisplayKey = 'kimi-helper.card-display'
+function readCardDisplay(): { estimates: boolean; performance: boolean } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(cardDisplayKey) ?? '{}')
+    return { estimates: saved?.estimates !== false, performance: saved?.performance !== false }
+  } catch {
+    return { estimates: true, performance: true }
+  }
+}
 const peakPeriodHint =
   '北京时间：周一至周五 09:00–12:00、14:00–18:00 为峰期，其余为谷期；按请求开始时间归类'
-function AccountPerformance({ stats }: { stats: UsageStats['byAccount'] }) {
+function AccountPerformance({
+  stats,
+  account
+}: {
+  stats: UsageStats['byAccount']
+  account: Pick<AccountView, 'id' | 'name'>
+}) {
+  const [historyOpen, setHistoryOpen] = useState(false)
   const models = [...new Set(stats.map((item) => item.model))]
   return (
     <section className="account-performance" aria-label="按模型峰谷性能">
       <div className="account-performance-heading">
-        <span>模型表现</span>
+        <span className="performance-title">
+          模型表现
+          <button
+            className="icon-button performance-list-button"
+            type="button"
+            title="近 30 天模型表现"
+            aria-label={`查看 ${account.name} 近 30 天模型表现`}
+            onClick={() => setHistoryOpen(true)}
+          >
+            <List size={12} />
+          </button>
+        </span>
         <span title={peakPeriodHint}>今日 · 峰谷分时</span>
       </div>
       {models.length ? (
@@ -130,7 +162,152 @@ function AccountPerformance({ stats }: { stats: UsageStats['byAccount'] }) {
           平均首 token / 生成速度 <span>—</span>
         </p>
       )}
+      {historyOpen && <PerformanceHistory account={account} close={() => setHistoryOpen(false)} />}
     </section>
+  )
+}
+function PerformanceHistory({
+  account,
+  close
+}: {
+  account: Pick<AccountView, 'id' | 'name'>
+  close: () => void
+}) {
+  const [result, setResult] = useState<{
+    rows: UsageStats['byAccount']
+    days: string[]
+    start: number
+    end: number
+  }>()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [reload, setReload] = useState(0)
+  useEffect(() => {
+    let active = true
+    const { start, end, days } = performanceHistoryRange()
+    setLoading(true)
+    setError('')
+    api
+      .getUsageStats({
+        accountId: account.id,
+        start,
+        end,
+        bucketMs: 86400000,
+        performanceByDay: true
+      })
+      .then(
+        (stats) => {
+          if (active)
+            setResult({
+              rows: stats.byAccount.filter((row) => row.accountId === account.id),
+              days,
+              start,
+              end
+            })
+        },
+        (e) => {
+          if (active) setError(errorText(e))
+        }
+      )
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [account.id, reload])
+  return (
+    <Modal title={`${account.name} · 近 30 天模型表现`} close={close}>
+      <div className="performance-history-toolbar">
+        <div className="performance-history-summary">
+          <span title="按北京时间自然日统计，包含今天，共 30 天">北京时间 · 每日</span>
+          {result && (
+            <span
+              title={`截至 ${new Date(result.end).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`}
+            >
+              {result.days.at(-1)} — {result.days[0]}
+            </span>
+          )}
+          <span
+            className="performance-history-hint"
+            title={peakPeriodHint}
+            tabIndex={0}
+            aria-label={peakPeriodHint}
+          >
+            峰谷分时 <CircleHelp size={12} />
+          </span>
+        </div>
+        <button
+          type="button"
+          className="text-button"
+          disabled={loading}
+          onClick={() => setReload((value) => value + 1)}
+        >
+          刷新
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="panel-error">
+          {error}
+        </p>
+      )}
+      {loading ? (
+        <p className="muted">正在加载…</p>
+      ) : (
+        !error &&
+        result && (
+          <div className="table-scroll">
+            <table className="performance-history-table" aria-label="近 30 天模型表现列表">
+              <thead>
+                <tr>
+                  <th>模型</th>
+                  <th>时段</th>
+                  <th>平均首 token</th>
+                  <th>平均生成速度</th>
+                </tr>
+              </thead>
+              {result.days.map((day) => (
+                <tbody key={day} data-performance-day={day}>
+                  <tr className="performance-day-heading">
+                    <th colSpan={4} scope="rowgroup">
+                      {day}
+                      {day === result.days[0] ? ' · 今天' : ''}
+                    </th>
+                  </tr>
+                  {!result.rows.some((row) => row.day === day) && (
+                    <tr>
+                      <td colSpan={4} className="muted">
+                        暂无记录
+                      </td>
+                    </tr>
+                  )}
+                  {result.rows
+                    .filter((row) => row.day === day)
+                    .map((row) => (
+                      <tr key={`${row.model}:${row.period}`}>
+                        <td>{row.model}</td>
+                        <td>{row.period === 'peak' ? '峰期' : '谷期'}</td>
+                        <td title="成功且未中断请求的首 token 耗时算术平均，包含重试等待">
+                          {row.averageFirstTokenMs == null
+                            ? '—'
+                            : formatLatency(row.averageFirstTokenMs)}
+                          <small>{row.firstTokenSamples} 个有效请求</small>
+                        </td>
+                        <td title="总输出 token ÷ 总上游流式时长（含首字等待）">
+                          {row.averageTokensPerSecond == null
+                            ? '—'
+                            : `${row.averageTokensPerSecond.toFixed(1)} tokens/s`}
+                          <small>{row.speedSamples} 个有效请求</small>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              ))}
+            </table>
+          </div>
+        )
+      )}
+    </Modal>
   )
 }
 function ProviderLogo({ provider }: { provider?: AccountInput['provider'] }) {
@@ -236,6 +413,14 @@ function quotaRemaining(window: QuotaWindow | null | undefined, unit?: 'percent'
     ? `${format(window?.remaining)}%`
     : `${format(window?.remaining)} / ${format(window?.limit)}`
 }
+function quotaMoney(currency: string, value: number): string {
+  return `${currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: value > 0 && value < 0.01 ? 6 : 2 })}`
+}
+function quotaCycleDateTime(value: number): string {
+  const date = new Date(value)
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${String(date.getFullYear()).padStart(4, '0')}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
 function compactReset(value: string): string {
   const date = new Date(value)
   return date.toLocaleString('zh-CN', {
@@ -259,12 +444,21 @@ function capabilityWarning(
 function QuotaDetails({
   quota,
   loading,
-  overview = false
+  overview = false,
+  estimates,
+  showEstimates = true,
+  account,
+  onSnapshot
 }: {
   quota: AccountQuota | null | undefined
   loading: boolean
   overview?: boolean
+  estimates?: AccountView['quotaEstimates']
+  showEstimates?: boolean
+  account?: Pick<AccountView, 'id' | 'name'>
+  onSnapshot?: (snapshot: GatewaySnapshot) => void
 }) {
+  const [managing, setManaging] = useState<QuotaCycleQuery['window']>()
   return (
     <section className="quota-details" aria-label="账号额度">
       {!overview && (
@@ -275,13 +469,13 @@ function QuotaDetails({
       <div className="form-grid">
         {(
           [
-            [overview ? '5h 剩余额度' : '5 小时额度', quota?.fiveHour],
-            [overview ? '7D 剩余额度' : '7 天额度', quota?.weekly],
+            [overview ? '5h 剩余额度' : '5 小时额度', quota?.fiveHour, estimates?.fiveHour],
+            [overview ? '7D 剩余额度' : '7 天额度', quota?.weekly, estimates?.weekly],
             ...(quota?.monthly !== undefined
-              ? [[overview ? '月 剩余额度' : '月额度', quota.monthly] as const]
+              ? [[overview ? '月 剩余额度' : '月额度', quota.monthly, undefined] as const]
               : [])
           ] as const
-        ).map(([label, window]) => {
+        ).map(([label, window, estimate], index) => {
           const amount = overview ? window?.remaining : window?.used
           const percent =
             window?.limit && amount != null
@@ -289,7 +483,20 @@ function QuotaDetails({
               : null
           return (
             <div className="quota-window" key={label}>
-              <strong>{overview ? label.split(' ')[0] : label}</strong>
+              <strong className="quota-window-label">
+                {overview ? label.split(' ')[0] : label}
+                {overview && showEstimates && account && index < 2 && (
+                  <button
+                    type="button"
+                    className="icon-button quota-cycle-tool"
+                    aria-label={`管理 ${account.name} ${index === 0 ? '5H' : '7D'} 统计周期`}
+                    title="管理统计周期"
+                    onClick={() => setManaging(index === 0 ? 'fiveHour' : 'weekly')}
+                  >
+                    <Wrench size={11} />
+                  </button>
+                )}
+              </strong>
               {overview && (
                 <b
                   className="remaining-percent"
@@ -315,16 +522,191 @@ function QuotaDetails({
                     ? '未提供重置时间'
                     : '暂无额度数据'}
               </small>
+              {showEstimates && estimate && (
+                <div
+                  className="quota-cost-estimate"
+                  title="按本周期截至额度同步时的本地请求费用 ÷ 已用比例估算。费用优先采用上游报告，否则按当前模型价格计算；外部用量、缺失记录和百分比精度会影响结果，不代表官方余额。"
+                >
+                  {estimate.amounts.length ? (
+                    estimate.amounts.map((amount) => {
+                      const money = (value: number) => quotaMoney(amount.currency, value)
+                      return (
+                        <div key={amount.currency}>
+                          <span>
+                            估算总额 <b>{money(amount.total)}</b>
+                          </span>
+                          <span>
+                            估算可用 <b>{money(amount.remaining)}</b>
+                          </span>
+                        </div>
+                      )
+                    })
+                  ) : estimate.reason !== '待产生用量' ? (
+                    <small>金额估算：{estimate.reason}</small>
+                  ) : null}
+                  {estimate.averages?.length ? (
+                    estimate.averages.map((average) => (
+                      <span
+                        key={average.currency}
+                        title={`本账号 ${label.split(' ')[0]} 的 ${average.cycles} 个有效周期的估算总额算术平均；当前周期有有效估算时也计入，每周期只取最后一次有效估算，币种分别统计。从启用此功能起积累，历史周期保留当时价格。`}
+                      >
+                        估算均值 <b>{quotaMoney(average.currency, average.total)}</b>
+                      </span>
+                    ))
+                  ) : (
+                    <span title="从当前周期开始积累，每周期保存最后一次有效估算">
+                      估算均值 <b>—</b>
+                    </span>
+                  )}
+                  <span title="本周期截至额度同步时的本地请求：缓存读取 token ÷（未缓存输入 + 缓存读取 + 缓存写入 token）。按 token 总量汇总，不含输出；跳过未报告输入或缓存读取的请求。无有效输入时显示 —。">
+                    缓存命中率{' '}
+                    <b>
+                      {estimate.cacheHitRate == null
+                        ? '—'
+                        : `${Number((estimate.cacheHitRate * 100).toFixed(1))}%`}
+                    </b>
+                  </span>
+                </div>
+              )}
             </div>
           )
         })}
       </div>
+      {managing && account && (
+        <QuotaCycleManager
+          account={account}
+          window={managing}
+          close={() => setManaging(undefined)}
+          onSnapshot={onSnapshot}
+        />
+      )}
       {!overview && (quota?.total || quota?.totalUnlimited) && (
         <small>
           总额度：{quota.totalUnlimited ? '无总额度限制' : `剩余 ${quotaRemaining(quota.total)}`}
         </small>
       )}
     </section>
+  )
+}
+function QuotaCycleManager({
+  account,
+  window: quotaWindow,
+  close,
+  onSnapshot
+}: {
+  account: Pick<AccountView, 'id' | 'name'>
+  window: QuotaCycleQuery['window']
+  close: () => void
+  onSnapshot?: (snapshot: GatewaySnapshot) => void
+}) {
+  const [cycles, setCycles] = useState<QuotaCostCycle[]>()
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [reload, setReload] = useState(0)
+  useEffect(() => {
+    let active = true
+    setError('')
+    setCycles(undefined)
+    api.getQuotaCycles({ accountId: account.id, window: quotaWindow }).then(
+      (rows) => {
+        if (active) setCycles(rows)
+      },
+      (e) => {
+        if (active) setError(errorText(e))
+      }
+    )
+    return () => {
+      active = false
+    }
+  }, [account.id, quotaWindow, reload])
+  async function toggle(cycle: QuotaCostCycle) {
+    setSaving(true)
+    setError('')
+    try {
+      const snapshot = await api.setQuotaCycleExcluded({
+        accountId: account.id,
+        window: quotaWindow,
+        resetAt: cycle.resetAt,
+        excluded: !cycle.excluded
+      })
+      onSnapshot?.(snapshot)
+      setCycles((rows) =>
+        rows?.map((row) =>
+          row.resetAt === cycle.resetAt ? { ...row, excluded: !cycle.excluded } : row
+        )
+      )
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+  const duration = quotaWindow === 'fiveHour' ? 5 * 3600000 : 7 * 86400000
+  return (
+    <Modal
+      title={`${account.name} · ${quotaWindow === 'fiveHour' ? '5H' : '7D'} 统计周期`}
+      close={close}
+    >
+      <p className="muted">
+        排除的周期不参与估算均值，可随时恢复。原始请求记录和当前额度不受影响。
+      </p>
+      {error && (
+        <div role="alert" className="panel-error">
+          {error}
+          <button
+            className="text-button"
+            disabled={saving}
+            onClick={() => setReload((value) => value + 1)}
+          >
+            重新加载
+          </button>
+        </div>
+      )}
+      {!cycles ? (
+        !error && <p className="muted">正在加载…</p>
+      ) : !cycles.length ? (
+        <p className="muted">暂无有效周期记录，产生有效估算后会自动记录。</p>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table quota-cycle-table" aria-label="额度统计周期">
+            <thead>
+              <tr>
+                <th>周期</th>
+                <th>估算总额</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cycles.map((cycle) => (
+                <tr key={cycle.resetAt}>
+                  <td>
+                    <div>起：{quotaCycleDateTime(Date.parse(cycle.resetAt) - duration)}</div>
+                    <div>止：{quotaCycleDateTime(Date.parse(cycle.resetAt))}</div>
+                  </td>
+                  <td title={`最后有效估算：${new Date(cycle.checkedAt).toLocaleString()}`}>
+                    {cycle.amounts.map((amount) => (
+                      <div key={amount.currency}>{quotaMoney(amount.currency, amount.total)}</div>
+                    ))}
+                  </td>
+                  <td>{cycle.excluded ? '已排除' : '参与均值'}</td>
+                  <td>
+                    <button
+                      className="text-button"
+                      type="button"
+                      disabled={saving}
+                      onClick={() => void toggle(cycle)}
+                    >
+                      {cycle.excluded ? '恢复统计' : '排除统计'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
   )
 }
 function Modal({
@@ -388,6 +770,8 @@ export function GatewayPanel({
   onStatusChange: (status: GatewayStatus | undefined) => void
 }) {
   const [snapshot, setSnapshot] = useState<GatewaySnapshot>()
+  const [cardDisplay, setCardDisplay] = useState(readCardDisplay)
+  const [displaySettingsOpen, setDisplaySettingsOpen] = useState(false)
   const [accountSpeeds, setAccountSpeeds] = useState<UsageStats['byAccount']>([])
   const [usageRefreshInterval, setUsageRefreshInterval] = useState(5000)
   const [page, setPage] = useState<'overview' | 'management'>('overview')
@@ -575,6 +959,12 @@ export function GatewayPanel({
             </button>
           )}
           {page === 'overview' && (
+            <button className="button" onClick={() => setDisplaySettingsOpen(true)}>
+              <PanelsTopLeft size={15} />
+              卡片显示
+            </button>
+          )}
+          {page === 'overview' && (
             <button className="button" onClick={() => setPage('management')}>
               <Users size={15} />
               账号管理
@@ -703,9 +1093,19 @@ export function GatewayPanel({
                     {account.provider === 'deepseek' ? (
                       <BalanceDetails capabilities={account.capabilities} />
                     ) : (
-                      <QuotaDetails quota={account.capabilities?.quota} loading={false} overview />
+                      <QuotaDetails
+                        account={account}
+                        onSnapshot={setSnapshot}
+                        quota={account.capabilities?.quota}
+                        estimates={account.quotaEstimates}
+                        showEstimates={cardDisplay.estimates}
+                        loading={false}
+                        overview
+                      />
                     )}
-                    <AccountPerformance stats={speeds} />
+                    {cardDisplay.performance && (
+                      <AccountPerformance stats={speeds} account={account} />
+                    )}
                   </article>
                 )
               })}
@@ -715,6 +1115,40 @@ export function GatewayPanel({
       )}
       {page === 'overview' && (
         <UsageDashboard interval={usageRefreshInterval} onAccountStats={setAccountSpeeds} />
+      )}
+      {displaySettingsOpen && (
+        <Modal title="卡片显示" close={() => setDisplaySettingsOpen(false)}>
+          <p className="muted">选择所有账号卡片中显示的模块，修改后立即生效。</p>
+          <div className="card-display-options">
+            {(
+              [
+                ['estimates', '额度估算', '包含估算总额、估算可用、估算均值和缓存命中率'],
+                ['performance', '模型表现', '显示各模型的首 token 时间和生成速度']
+              ] as const
+            ).map(([key, label, hint]) => (
+              <label key={key}>
+                <input
+                  type="checkbox"
+                  aria-label={label}
+                  checked={cardDisplay[key]}
+                  onChange={(event) => {
+                    const next = { ...cardDisplay, [key]: event.target.checked }
+                    try {
+                      localStorage.setItem(cardDisplayKey, JSON.stringify(next))
+                      setCardDisplay(next)
+                    } catch {
+                      setError('卡片显示设置保存失败，请重试。')
+                    }
+                  }}
+                />
+                <span>
+                  {label}
+                  <small>{hint}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </Modal>
       )}
       {page === 'management' && (
         <section aria-label="账号管理">

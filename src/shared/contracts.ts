@@ -17,6 +17,10 @@ export interface HelperApi {
   saveSettings(settings: AppSettings): Promise<AppSettings>
   getGateway(): Promise<GatewaySnapshot>
   getRequestHistory(before?: number): Promise<RequestHistoryPage>
+  getQuotaCycles(
+    query: import('./quota-cost').QuotaCycleQuery
+  ): Promise<import('./quota-cost').QuotaCostCycle[]>
+  setQuotaCycleExcluded(input: import('./quota-cost').QuotaCycleExclusion): Promise<GatewaySnapshot>
   saveAccount(input: AccountInput): Promise<GatewaySnapshot>
   inspectAccount(input: AccountProbe): Promise<AccountCapabilities>
   refreshAccount(id: string): Promise<GatewaySnapshot>
@@ -64,6 +68,7 @@ export interface AccountView extends Omit<AccountInput, 'secret' | 'id'> {
   maxConcurrency: number
   models: string[]
   capabilities: AccountCapabilities | null
+  quotaEstimates?: Partial<Record<'fiveHour' | 'weekly', import('./quota-cost').QuotaCostEstimate>>
   hasCredential: boolean
   runtime: AccountRuntime
 }
@@ -218,6 +223,8 @@ export const IPC = {
   settingsSave: 'settings:save',
   gatewayGet: 'gateway:get',
   requestHistory: 'gateway:request-history',
+  quotaCycles: 'gateway:quota-cycles',
+  quotaCycleExclude: 'gateway:quota-cycle-exclude',
   usageStats: 'gateway:usage-stats',
   accountSave: 'account:save',
   accountInspect: 'account:inspect',

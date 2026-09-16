@@ -127,6 +127,11 @@ void app
     })
     handle(IPC.gatewayGet, () => service.snapshot())
     handle(IPC.requestHistory, (before) => service.history.page(before as number | undefined))
+    handle(IPC.quotaCycles, (query) => service.history.getQuotaCycles(query))
+    handle(IPC.quotaCycleExclude, (input) => {
+      service.history.setQuotaCycleExcluded(input)
+      return service.snapshot()
+    })
     handle(IPC.usageStats, (query) =>
       service.history.usage(query as import('../shared/usage').UsageQuery, service.snapshot())
     )

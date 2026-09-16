@@ -15,6 +15,8 @@ let fiveHourRemaining = 40
 let weeklyRemaining = 80
 let pricingUnavailable = false
 let pricingRequests = 0
+const fiveHourReset = new Date(Date.now() + 4 * 3600000).toISOString()
+const weeklyReset = new Date(Date.now() + 6 * 86400000).toISOString()
 const upstream = createServer((req, res) => {
   if (req.url === '/api.json') {
     pricingRequests++
@@ -41,7 +43,7 @@ const upstream = createServer((req, res) => {
           ? { data: [{ id: 'glm-test' }, { id: 'minimax-test' }, { id: 'gpt-test' }] }
           : {
               usage: {
-                rolling: { percent: 10, resetsAt: '2030-01-01T05:00:00Z' },
+                rolling: { percent: 10, resetsAt: fiveHourReset },
                 weekly: { percent: 20 },
                 monthly: { percent: 30 }
               }
@@ -78,7 +80,7 @@ const upstream = createServer((req, res) => {
           limit: '100',
           used: String(100 - weeklyRemaining),
           remaining: String(weeklyRemaining),
-          resetTime: '2030-01-08T00:00:00Z'
+          resetTime: weeklyReset
         },
         limits: [
           {
@@ -87,7 +89,7 @@ const upstream = createServer((req, res) => {
               limit: '50',
               used: String(50 - fiveHourRemaining),
               remaining: String(fiveHourRemaining),
-              resetTime: '2030-01-01T05:00:00Z'
+              resetTime: fiveHourReset
             }
           }
         ]
@@ -462,6 +464,7 @@ try {
   await page.waitForFunction(() =>
     document.querySelector('.activity-summary')?.textContent.includes('1 天')
   )
+  await page.locator('.toast').waitFor({ state: 'hidden' })
   await heatmap.locator('.heatmap-day.is-today').waitFor()
   await heatmap.locator('.heatmap-day.is-today').hover()
   await heatmap.getByRole('tooltip').waitFor()
@@ -471,6 +474,7 @@ try {
   assert.ok((await heatmap.locator('.heatmap-day').count()) > 300)
   await heatmap.getByRole('button', { name: '每周', exact: true }).click()
   assert.ok((await heatmap.locator('.heatmap-level-3').count()) > 0)
+  await heatmap.locator('.heatmap-level-3').last().scrollIntoViewIfNeeded()
   await heatmap.locator('.heatmap-level-3').last().hover()
   assert.match(await heatmap.getByRole('tooltip').textContent(), /当周：/)
   assert.equal(await heatmap.locator('.is-hovered').count(), 7)
@@ -508,6 +512,58 @@ try {
   await page.getByRole('button', { name: '刷新 开发账号 B 额度', exact: true }).click()
   await quotaCard.getByTitle('剩余 35 / 50', { exact: true }).waitFor()
   await quotaCard.getByTitle('剩余 60 / 100', { exact: true }).waitFor()
+  const costCard = page.getByRole('article', { name: '开发账号 B 额度', exact: true })
+  await costCard.getByText('估算总额', { exact: false }).first().waitFor()
+  assert.equal(await quotaCard.locator('.quota-cost-estimate').count(), 2)
+  const estimatedAccount = await page.evaluate(async () =>
+    (await window.kimiHelper.getGateway()).accounts.find((account) => account.name === '开发账号 B')
+  )
+  for (const [key, fraction] of [
+    ['fiveHour', 0.3],
+    ['weekly', 0.4]
+  ]) {
+    const amount = estimatedAccount.quotaEstimates[key].amounts[0]
+    assert.ok(amount.used > 0)
+    assert.ok(Math.abs(amount.total - amount.used / fraction) < 1e-9)
+    const average = estimatedAccount.quotaEstimates[key].averages.find(
+      (entry) => entry.currency === amount.currency
+    )
+    assert.equal(average.cycles, 1)
+    assert.equal(average.total, amount.total)
+    assert.equal(estimatedAccount.quotaEstimates[key].cacheHitRate, 0.8)
+  }
+  assert.equal(await costCard.getByText('估算均值', { exact: false }).count(), 2)
+  assert.equal(await costCard.getByText('缓存命中率', { exact: false }).count(), 2)
+  assert.equal(
+    await costCard.locator('.quota-cost-estimate').getByText('80%', { exact: true }).count(),
+    2
+  )
+  await page.screenshot({ path: join(artifacts, 'quota-cost-estimates.png') })
+  await costCard.getByRole('button', { name: '管理 开发账号 B 5H 统计周期', exact: true }).click()
+  const cycleDialog = page.getByRole('dialog', { name: '开发账号 B · 5H 统计周期', exact: true })
+  await cycleDialog.getByRole('button', { name: '排除统计', exact: true }).click()
+  await cycleDialog.getByText('已排除', { exact: true }).waitFor()
+  const excludedSnapshot = await page.evaluate(() => window.kimiHelper.getGateway())
+  assert.deepEqual(
+    excludedSnapshot.accounts.find((a) => a.name === '开发账号 B').quotaEstimates.fiveHour.averages,
+    []
+  )
+  assert.equal(
+    excludedSnapshot.accounts.find((a) => a.name === '开发账号 B').quotaEstimates.weekly.averages
+      .length,
+    1
+  )
+  await page.screenshot({ path: join(artifacts, 'quota-cycle-manager.png') })
+  await cycleDialog.getByRole('button', { name: '恢复统计', exact: true }).click()
+  await cycleDialog.getByText('参与均值', { exact: true }).waitFor()
+  const restoredCycles = await page.evaluate(() => window.kimiHelper.getGateway())
+  assert.equal(
+    restoredCycles.accounts.find((a) => a.name === '开发账号 B').quotaEstimates.fiveHour.averages[0]
+      .cycles,
+    1
+  )
+  await cycleDialog.getByRole('button', { name: '关闭对话框', exact: true }).click()
+
   assert.equal(
     await quotaCard.getByRole('progressbar', { name: '5h 剩余额度比例' }).getAttribute('value'),
     '70'

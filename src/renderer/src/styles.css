@@ -1629,6 +1629,7 @@ textarea {
 .overview-account-card .quota-window {
   display: grid;
   grid-template-columns: 1fr auto;
+  align-content: start;
   align-items: center;
   gap: 6px 10px;
   padding: 0;
@@ -1644,6 +1645,105 @@ textarea {
   line-height: 1.2;
   font-weight: 600;
   color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+.quota-window-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.quota-window-label .quota-cycle-tool {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+}
+.quota-cycle-table td {
+  white-space: nowrap;
+}
+.card-display-options {
+  display: grid;
+  gap: 18px;
+  padding: 8px 0;
+}
+.card-display-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.card-display-options small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+.performance-title,
+.performance-history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.performance-history-toolbar {
+  justify-content: space-between;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  background: var(--control-background);
+  color: var(--muted);
+  font-size: 10px;
+}
+.performance-history-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.performance-history-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+}
+.performance-history-toolbar > button {
+  flex-shrink: 0;
+}
+.performance-title .performance-list-button {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+}
+.performance-history-table small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+  white-space: nowrap;
+}
+.performance-history-table .performance-day-heading th {
+  color: var(--accent-text);
+  background: var(--control-background);
+  font-weight: 600;
+}
+.performance-history-table td:first-child {
+  max-width: 200px;
+  overflow-wrap: anywhere;
+}
+.quota-cost-estimate {
+  grid-column: 1 / -1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.quota-cost-estimate span {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 4px;
+}
+.quota-cost-estimate b {
+  color: var(--accent-text);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 .overview-account-card .quota-window > span {

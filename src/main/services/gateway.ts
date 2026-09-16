@@ -26,6 +26,7 @@ import { RequestHistory } from './request-history'
 import { ResponseIdsObserver, validRequestId } from './response-ids'
 import type { TokenUsage, UsageProtocol } from '../../shared/usage'
 import { QUOTA_REFRESH_MS } from '../../shared/kimi-quota'
+import { estimateQuotaCost, quotaCacheHitRate } from '../../shared/quota-cost'
 import { requestSessionId } from '../../shared/request-session'
 import { openCodeSession } from '../../shared/opencode-go'
 import { modelUpstreamRoute } from '../../shared/model-protocols'
@@ -116,7 +117,7 @@ export class Gateway {
   }
   snapshot(): GatewaySnapshot {
     const data = this.store.get()
-    return {
+    const snapshot: GatewaySnapshot = {
       activeRequestCount: this.controllers.size,
       settings: data.settings,
       modelPrices: data.modelPrices,
@@ -133,6 +134,43 @@ export class Gateway {
       error: this.error,
       requests: [...this.requests]
     }
+    for (const account of snapshot.accounts) {
+      const caps = account.capabilities
+      if (!caps?.quota) continue
+      account.quotaEstimates = {}
+      for (const [key, duration] of [
+        ['fiveHour', 5 * 3600000],
+        ['weekly', 7 * 86400000]
+      ] as const) {
+        const window = caps.quota[key]
+        const reset = Date.parse(window?.resetAt ?? '')
+        const records =
+          Number.isFinite(reset) && reset > Date.now()
+            ? this.history.quotaUsage(account.id, reset - duration, caps.checkedAt)
+            : []
+        account.quotaEstimates[key] = estimateQuotaCost(
+          window,
+          duration,
+          caps.checkedAt,
+          records,
+          snapshot
+        )
+        account.quotaEstimates[key].averages = this.history.quotaAverages(
+          account.id,
+          key,
+          window?.resetAt,
+          caps.checkedAt,
+          account.quotaEstimates[key]
+        )
+        account.quotaEstimates[key].cacheHitRate = quotaCacheHitRate(
+          window,
+          duration,
+          caps.checkedAt,
+          records
+        )
+      }
+    }
+    return snapshot
   }
   private exclusive<T>(action: () => Promise<T>): Promise<T> {
     const pending = this.transitions.then(action)
