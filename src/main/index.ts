@@ -100,6 +100,7 @@ void app
     })
     await gatewayStore.load()
     const service = new Gateway(gatewayStore)
+    await service.pricing.load()
     gateway = service
     const handle = (channel: string, callback: (value: unknown) => unknown): void => {
       ipcMain.handle(channel, (event, value: unknown) => {
@@ -127,7 +128,7 @@ void app
     handle(IPC.gatewayGet, () => service.snapshot())
     handle(IPC.requestHistory, (before) => service.history.page(before as number | undefined))
     handle(IPC.usageStats, (query) =>
-      service.history.usage(query as import('../shared/usage').UsageQuery)
+      service.history.usage(query as import('../shared/usage').UsageQuery, service.snapshot())
     )
     handle(IPC.accountSave, (value) => service.saveAccount(value))
     handle(IPC.accountInspect, (value) => service.inspectAccount(value))
@@ -141,6 +142,19 @@ void app
       const id = string(value, '账号 ID')
       if (!gatewayStore.get().accounts.some((a) => a.id === id)) throw new Error('账号不存在')
       service.scheduler.reset(id)
+      return service.snapshot()
+    })
+    handle(IPC.modelPriceRefresh, async (force) => {
+      if (force !== undefined && typeof force !== 'boolean') throw new Error('刷新参数无效')
+      await service.pricing.refresh(force as boolean | undefined)
+      return service.snapshot()
+    })
+    handle(IPC.quotaCardOrderSave, async (value) => {
+      await gatewayStore.saveQuotaCardOrder(value)
+      return service.snapshot()
+    })
+    handle(IPC.modelPriceSave, async (value) => {
+      await gatewayStore.saveModelPrice(value)
       return service.snapshot()
     })
     handle(IPC.gatewaySave, (value) => service.saveSettings(value))
@@ -186,10 +200,12 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   quitting = true
   void gateway.shutdown().finally(() => {
-    gateway?.history.close()
     app.quit()
   })
 })
+
+// before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
+app.on('quit', () => gateway?.history.close())
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

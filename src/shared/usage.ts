@@ -16,6 +16,8 @@ export interface UsageQuery {
   model?: string
 }
 export interface UsageTotals extends TokenUsage {
+  costAmounts?: { currency: 'USD' | 'CNY'; value: number }[]
+  interruptedCostAmounts?: { currency: 'USD' | 'CNY'; value: number }[]
   averageTokensPerSecond: number | null
   speedSamples: number
   interruptedRequests: number
@@ -28,7 +30,15 @@ export interface UsageTotals extends TokenUsage {
   totalTokens: number | null
   cacheHitRate: number | null
 }
+export interface ActivitySummary {
+  totalTokens: number
+  peakTokens: number
+  longestChatMs: number | null
+  currentStreak: number
+  longestStreak: number
+}
 export interface UsageStats {
+  activity?: ActivitySummary
   byAccount: {
     period: 'peak' | 'off-peak'
     averageFirstTokenMs: number | null
@@ -95,4 +105,75 @@ export function parseUsage(value: unknown, protocol: UsageProtocol): Partial<Tok
   const cost = u.cost_usd ?? u.total_cost_usd
   if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) result.cost = cost
   return Object.keys(result).length ? result : null
+}
+
+export function formatUsageCost(totals: Pick<UsageTotals, 'cost' | 'costAmounts'>): string {
+  if (totals.costAmounts)
+    return totals.costAmounts.length
+      ? totals.costAmounts
+          .map(
+            (p) =>
+              `${p.currency} ${p.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+          )
+          .join(' + ')
+      : '0.00'
+  return totals.cost == null ? '未知' : `USD ${totals.cost.toFixed(4)}`
+}
+
+export function summarizeActivity(
+  records: {
+    time: number
+    durationMs: number
+    account: string
+    tokens: number
+    sessionId?: string | null
+  }[],
+  now = Date.now()
+): ActivitySummary {
+  const days = new Map<string, number>()
+  const sessions = new Map<string, { start: number; end: number }>()
+  let totalTokens = 0
+  let longestChatMs: number | null = null
+  for (const record of [...records].sort((a, b) => a.time - b.time)) {
+    if (!Number.isFinite(record.time) || record.time > now) continue
+    const tokens = Number.isFinite(record.tokens) ? Math.max(0, record.tokens) : 0
+    const day = localDayKey(record.time)
+    days.set(day, (days.get(day) ?? 0) + tokens)
+    totalTokens += tokens
+    const end =
+      record.time + (Number.isFinite(record.durationMs) ? Math.max(0, record.durationMs) : 0)
+    if (record.sessionId) {
+      const previous = sessions.get(record.sessionId)
+      const session = previous
+        ? { start: previous.start, end: Math.max(previous.end, end) }
+        : { start: record.time, end }
+      sessions.set(record.sessionId, session)
+      longestChatMs = Math.max(longestChatMs ?? 0, session.end - session.start)
+    }
+  }
+  let longestStreak = 0,
+    streak = 0,
+    previousDay = ''
+  for (const day of [...days.keys()].sort()) {
+    const yesterday = new Date(`${day}T12:00:00`)
+    yesterday.setDate(yesterday.getDate() - 1)
+    streak = localDayKey(+yesterday) === previousDay ? streak + 1 : 1
+    longestStreak = Math.max(longestStreak, streak)
+    previousDay = day
+  }
+  const cursor = new Date(now)
+  cursor.setHours(12, 0, 0, 0)
+  if (!days.has(localDayKey(+cursor))) cursor.setDate(cursor.getDate() - 1)
+  let currentStreak = 0
+  while (days.has(localDayKey(+cursor))) {
+    currentStreak++
+    cursor.setDate(cursor.getDate() - 1)
+  }
+  return {
+    totalTokens,
+    peakTokens: Math.max(0, ...days.values()),
+    longestChatMs,
+    currentStreak,
+    longestStreak
+  }
 }

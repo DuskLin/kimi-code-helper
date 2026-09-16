@@ -22,6 +22,9 @@ export interface HelperApi {
   refreshAccount(id: string): Promise<GatewaySnapshot>
   deleteAccount(id: string): Promise<GatewaySnapshot>
   resetAccount(id: string): Promise<GatewaySnapshot>
+  refreshModelPrices(force?: boolean): Promise<GatewaySnapshot>
+  saveQuotaCardOrder(ids: string[]): Promise<GatewaySnapshot>
+  saveModelPrice(input: ModelPrice): Promise<GatewaySnapshot>
   saveGateway(input: GatewaySettings): Promise<GatewaySnapshot>
   setGatewayRunning(running: boolean): Promise<GatewaySnapshot>
   copyConnection(input: {
@@ -138,6 +141,8 @@ export interface GatewaySettings {
   cooldownSeconds: number
 }
 export interface RequestRecord {
+  sessionId?: string
+  provider?: Provider
   interruption?:
     | 'client_disconnect'
     | 'timeout'
@@ -161,7 +166,36 @@ export interface RequestRecord {
   durationMs: number
   firstTokenMs: number | null
 }
+export interface ModelPrice {
+  catalogMatch?: { provider: string; model: string }
+  provider: Provider
+  model: string
+  currency: 'CNY' | 'USD'
+  /** 每百万 token 单价；null 表示未设置。 */
+  input: number | null
+  output: number | null
+  cacheRead: number | null
+  cacheWrite: number | null
+}
+
+export interface DefaultModelPrice extends ModelPrice {
+  tiered: boolean
+}
+export interface CatalogPrice extends Omit<DefaultModelPrice, 'provider'> {
+  provider: string
+  name: string
+  providerName: string
+}
+export interface ModelPriceCatalogSnapshot {
+  entries: CatalogPrice[]
+  prices: DefaultModelPrice[]
+  updatedAt: number | null
+  error: string
+}
 export interface GatewaySnapshot {
+  quotaCardOrder: string[]
+  modelPriceCatalog: ModelPriceCatalogSnapshot
+  modelPrices: ModelPrice[]
   activeRequestCount: number
   settings: GatewaySettings
   groups: GroupView[]
@@ -192,6 +226,9 @@ export const IPC = {
   accountReset: 'account:reset',
   groupSave: 'group:save',
   groupDelete: 'group:delete',
+  modelPriceRefresh: 'model-price:refresh',
+  quotaCardOrderSave: 'quota-card-order:save',
+  modelPriceSave: 'model-price:save',
   gatewaySave: 'gateway:save',
   gatewayRunning: 'gateway:running',
   connectionCopy: 'connection:copy'

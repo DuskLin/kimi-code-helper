@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { Activity, ArrowDown, ArrowUp, CircleSlash, DollarSign, Sparkles, Zap } from 'lucide-react'
 import type { UsageStats, UsageTotals } from '../../shared/usage'
-import { heatmapRange } from '../../shared/usage'
+import { formatUsageCost, heatmapRange } from '../../shared/usage'
 import { UsageHeatmap } from './UsageHeatmap'
 
 const compact = (n: number | null | undefined) =>
@@ -11,7 +11,7 @@ const compact = (n: number | null | undefined) =>
 const exact = (n: number | null | undefined) => (n == null ? 'N/A' : n.toLocaleString('zh-CN'))
 const money = (n: number | null | undefined) => (n == null ? 'N/A' : `$${n.toFixed(4)}`)
 const series = [
-  { key: 'cost', label: '成本', color: '#f66c8c' },
+  { key: 'cost', label: '成本（USD）', color: '#f66c8c' },
   { key: 'cacheRead', label: '缓存命中', color: '#a56bff' },
   { key: 'input', label: '新增输入', color: '#76b3ff' },
   { key: 'output', label: '输出', color: '#55b8c6' }
@@ -184,7 +184,7 @@ function Trend({ points, hourly }: { points: UsageStats['points']; hourly: boole
               <span key={s.key}>
                 <i style={{ background: s.color }} />
                 {s.label}
-                <b>{s.key === 'cost' ? money(selected.cost) : exact(selected[s.key])}</b>
+                <b>{s.key === 'cost' ? formatUsageCost(selected) : exact(selected[s.key])}</b>
               </span>
             ))}
           </div>
@@ -222,10 +222,12 @@ export function UsageDashboard({
   const [calendar, setCalendar] = useState<UsageStats>()
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [retry, setRetry] = useState(0)
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout>
     const load = async () => {
+      if (active) setLoading(true)
       const start = new Date()
       start.setHours(0, 0, 0, 0)
       const end = new Date(start)
@@ -249,8 +251,11 @@ export function UsageDashboard({
           setCalendar(daily)
           setError('')
         }
-      } catch {
-        if (active) setError('使用统计读取失败，请重试')
+      } catch (e) {
+        if (active)
+          setError(
+            `使用统计读取失败：${e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : '未知错误'}。可点击重试。`
+          )
       } finally {
         if (active) setLoading(false)
       }
@@ -261,7 +266,7 @@ export function UsageDashboard({
       active = false
       clearTimeout(timer)
     }
-  }, [interval, onAccountStats])
+  }, [interval, onAccountStats, retry])
   const s = data?.summary
   const metrics: {
     label: string
@@ -276,9 +281,12 @@ export function UsageDashboard({
       {error && (
         <p className="form-error" role="alert">
           {error}
+          <button className="text-button" onClick={() => setRetry((value) => value + 1)}>
+            重试
+          </button>
         </p>
       )}
-      <UsageHeatmap data={calendar} />
+      <UsageHeatmap data={calendar} loading={loading} />
       <div className="usage-hero">
         <div className="usage-total">
           <div>
@@ -357,16 +365,16 @@ export function UsageDashboard({
             </small>
             <strong>{s?.requests ?? '—'}</strong>
           </div>
-          <div title="仅汇总上游明确报告的美元成本，未返回费用时为 N/A">
+          <div title="上游报告费用优先，否则按当前模型单价计算；缺失价格与用量按 0 计，不同币种分别汇总">
             <small>
               <DollarSign size={13} />
               总成本
             </small>
-            <strong>{money(s?.cost)}</strong>
+            <strong>{s ? formatUsageCost(s) : '—'}</strong>
           </div>
           <div
             tabIndex={0}
-            title={`按网关检测到的中断事件统计：客户端 ${s?.interruptionCounts.client ?? 0} · 超时 ${s?.interruptionCounts.timeout ?? 0} · 上游 ${s?.interruptionCounts.upstream ?? 0} · 退出 ${s?.interruptionCounts.shutdown ?? 0}\n已报告用量 ${s?.interruptedReported ?? 0} / ${s?.interruptedRequests ?? 0} · ${exact(s?.interruptedTokens)} tokens · ${money(s?.interruptedCost)}\n用量仅包含中断前已报告的部分`}
+            title={`按网关检测到的中断事件统计：客户端 ${s?.interruptionCounts.client ?? 0} · 超时 ${s?.interruptionCounts.timeout ?? 0} · 上游 ${s?.interruptionCounts.upstream ?? 0} · 退出 ${s?.interruptionCounts.shutdown ?? 0}\n已报告用量 ${s?.interruptedReported ?? 0} / ${s?.interruptedRequests ?? 0} · ${exact(s?.interruptedTokens)} tokens · ${s ? formatUsageCost({ cost: s.interruptedCost, costAmounts: s.interruptedCostAmounts }) : '未知'}\n用量仅包含中断前已报告的部分`}
           >
             <small>
               <CircleSlash size={13} />

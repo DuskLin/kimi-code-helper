@@ -7,6 +7,7 @@ import {
   DEFAULT_ACCOUNT_CONCURRENCY,
   accountBaseUrl,
   type Provider,
+  type ModelPrice,
   type ModelProtocol,
   type AccountCapabilities,
   type AccountInput,
@@ -30,8 +31,10 @@ export interface StoredGroup extends GroupView {
   key: string
 }
 export interface GatewayData {
+  quotaCardOrder: string[]
   version: 1
   settings: GatewaySettings
+  modelPrices: ModelPrice[]
   accounts: StoredAccount[]
   groups: StoredGroup[]
 }
@@ -199,6 +202,7 @@ export function capabilityFields(
 export class GatewayStore {
   private data: GatewayData = {
     version: 1,
+    quotaCardOrder: [],
     settings: {
       port: 17300,
       autoStart: false,
@@ -206,6 +210,7 @@ export class GatewayStore {
       maxAttempts: 3,
       cooldownSeconds: 30
     },
+    modelPrices: [],
     accounts: [],
     groups: [
       {
@@ -306,13 +311,33 @@ export class GatewayStore {
         ...object(data.settings),
         stickySeconds: object(data.settings).stickySeconds ?? primary.stickySeconds
       })
-      this.data = { version: 1, settings, groups, accounts }
+      const prices = data.modelPrices ?? []
+      if (!Array.isArray(prices)) throw new Error('模型价格配置无效')
+      const modelPrices = prices.map(validateModelPrice)
+      if (
+        new Set(modelPrices.map((p) => JSON.stringify([p.provider, p.model]))).size !==
+        modelPrices.length
+      )
+        throw new Error('模型价格配置重复')
+      this.data = {
+        version: 1,
+        settings,
+        groups,
+        accounts,
+        modelPrices,
+        quotaCardOrder: validateQuotaCardOrder(data.quotaCardOrder ?? []).filter((id) =>
+          accounts.some((a) => a.id === id)
+        )
+      }
     } catch {
       throw new Error('账号配置损坏或系统钥匙串不可用。原文件已保留，请恢复钥匙串或备份后重启。')
     }
   }
   get(): GatewayData {
     return structuredClone(this.data)
+  }
+  get priceCachePath(): string {
+    return `${this.file}.model-prices.json`
   }
   get historyPath(): string {
     return `${this.file}.requests.sqlite`
@@ -374,6 +399,28 @@ export class GatewayStore {
     })
     return id
   }
+  async saveQuotaCardOrder(value: unknown): Promise<void> {
+    const ids = validateQuotaCardOrder(value)
+    await this.mutate((data) => {
+      data.quotaCardOrder = ids.filter((id) => data.accounts.some((account) => account.id === id))
+    })
+  }
+  async saveModelPrice(value: unknown): Promise<void> {
+    const price = validateModelPrice(value)
+    await this.mutate((data) => {
+      if (
+        !data.accounts.some(
+          (a) => (a.provider ?? 'kimi') === price.provider && a.models.includes(price.model)
+        )
+      )
+        throw new Error('模型已不在支持列表中，请刷新后重试')
+      const index = data.modelPrices.findIndex(
+        (p) => p.provider === price.provider && p.model === price.model
+      )
+      if (index < 0) data.modelPrices.push(price)
+      else data.modelPrices[index] = price
+    })
+  }
   async saveGroup(value: unknown): Promise<void> {
     await this.mutate((data) => {
       const input = validateGroup(value)
@@ -405,4 +452,47 @@ export class GatewayStore {
       data.groups = data.groups.filter((g) => g.id !== id)
     })
   }
+}
+
+export function validateModelPrice(value: unknown): ModelPrice {
+  const v = object(value)
+  if (!['kimi', 'deepseek', 'opencode-go'].includes(v.provider as string))
+    throw new Error('模型供应商无效')
+  if (v.currency !== 'CNY' && v.currency !== 'USD') throw new Error('价格币种无效')
+  const price = (key: string): number | null => {
+    const amount = v[key]
+    if (amount === null) return null
+    if (
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      amount < 0 ||
+      amount > 1_000_000_000
+    )
+      throw new Error('单价须为 0–1,000,000,000 的有效数字，或留空')
+    return amount
+  }
+  return {
+    ...(v.catalogMatch != null
+      ? {
+          catalogMatch: {
+            provider: string(object(v.catalogMatch).provider, '价格来源供应商', 200),
+            model: string(object(v.catalogMatch).model, '价格来源模型', 200)
+          }
+        }
+      : {}),
+    provider: v.provider as Provider,
+    model: string(v.model, '模型', 200),
+    currency: v.currency,
+    input: price('input'),
+    output: price('output'),
+    cacheRead: price('cacheRead'),
+    cacheWrite: price('cacheWrite')
+  }
+}
+
+export function validateQuotaCardOrder(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 10000) throw new Error('卡片顺序无效')
+  const ids = value.map((id) => string(id, '账号 ID'))
+  if (new Set(ids).size !== ids.length) throw new Error('卡片顺序不能包含重复账号')
+  return ids
 }

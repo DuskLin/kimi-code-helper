@@ -13,7 +13,25 @@ let application
 const forwarded = []
 let fiveHourRemaining = 40
 let weeklyRemaining = 80
+let pricingUnavailable = false
+let pricingRequests = 0
 const upstream = createServer((req, res) => {
+  if (req.url === '/api.json') {
+    pricingRequests++
+    assert.equal(req.headers.authorization, undefined)
+    res.writeHead(pricingUnavailable ? 503 : 200, { 'content-type': 'application/json' })
+    res.end(
+      JSON.stringify({
+        'kimi-for-coding': {
+          models: {
+            'kimi-for-coding': { cost: { input: 1, output: 3, cache_read: 0.2 } },
+            k3: { cost: { input: 2, output: 6, cache_read: 0.4, tiers: [{ input: 4 }] } }
+          }
+        }
+      })
+    )
+    return
+  }
   if (req.url === '/zen/go/v1/models' || req.url === '/zen/go/v1/usage') {
     assert.equal(req.headers.authorization, 'Bearer smoke-opencode-key')
     res.writeHead(200, { 'content-type': 'application/json' })
@@ -109,7 +127,7 @@ await writeFile(
   const realFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const url = new URL(String(input));
-    if (['api.kimi.com', 'api.kimi.ai', 'api.deepseek.com', 'opencode.ai'].includes(url.hostname)) {
+    if (['api.kimi.com', 'api.kimi.ai', 'api.deepseek.com', 'opencode.ai', 'models.dev'].includes(url.hostname)) {
       return realFetch('http://127.0.0.1:${upstreamPort}' + url.pathname + url.search, init);
     }
     return realFetch(input, init);
@@ -240,6 +258,91 @@ try {
     await page.getByRole('dialog').waitFor({ state: 'hidden' })
     await page.getByText(name, { exact: true }).waitFor()
   }
+  await page.getByRole('tab', { name: 'AI 费用管理', exact: true }).click()
+  const pricesTable = page.getByRole('table', { name: '模型单价', exact: true })
+  assert.equal(await pricesTable.locator('tbody tr').count(), 2)
+  await page.waitForFunction(
+    async () => (await window.kimiHelper.getGateway()).modelPriceCatalog.updatedAt !== null
+  )
+  await pricesTable.getByRole('cell', { name: '1 USD · API 默认', exact: true }).waitFor()
+  assert.equal(pricingRequests, 1)
+  await page
+    .getByRole('button', { name: '编辑 Kimi Code kimi-for-coding 单价', exact: true })
+    .click()
+  await page.getByLabel('输入单价（USD / 百万 token）', { exact: true }).fill('0')
+  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  await pricesTable.getByRole('cell', { name: '0 USD · 手动', exact: true }).waitFor()
+  await page
+    .getByRole('button', { name: '编辑 Kimi Code kimi-for-coding 单价', exact: true })
+    .click()
+  await page.getByRole('button', { name: '恢复 API 默认值', exact: true }).click()
+  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  await pricesTable.getByRole('cell', { name: '1 USD · API 默认', exact: true }).waitFor()
+  await page
+    .getByRole('button', { name: '编辑 Kimi Code kimi-for-coding 单价', exact: true })
+    .click()
+  await page.getByLabel('币种', { exact: true }).selectOption('CNY')
+  await page.getByLabel('输入单价（CNY / 百万 token）', { exact: true }).fill('1.25')
+  await page.getByLabel('输出单价（CNY / 百万 token）', { exact: true }).fill('8')
+  await page.getByLabel('缓存读取（CNY / 百万 token）', { exact: true }).fill('0')
+  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  const priceRow = pricesTable.getByRole('row').filter({ hasText: 'kimi-for-coding' })
+  await priceRow.getByRole('cell', { name: '1.25 CNY · 手动', exact: true }).waitFor()
+  await priceRow.getByRole('cell', { name: '0 CNY · 默认 0', exact: true }).waitFor()
+  pricingUnavailable = true
+  await page.getByRole('button', { name: '刷新默认价格', exact: true }).click()
+  await page.getByText('默认价格更新失败，继续使用上次缓存，可稍后重试', { exact: true }).waitFor()
+  await priceRow.getByRole('cell', { name: '1.25 CNY · 手动', exact: true }).waitFor()
+  await pricesTable.getByRole('cell', { name: '2 USD · API 默认', exact: true }).waitFor()
+  pricingUnavailable = false
+  await page.getByRole('button', { name: '刷新默认价格', exact: true }).click()
+  await page
+    .getByText('默认价格更新失败，继续使用上次缓存，可稍后重试', { exact: true })
+    .waitFor({ state: 'hidden' })
+  await page.screenshot({ path: join(artifacts, 'model-pricing.png') })
+  await page.getByLabel('搜索模型或供应商', { exact: true }).fill('not-supported')
+  await page.getByText('没有匹配的模型', { exact: true }).waitFor()
+  await page.getByLabel('搜索模型或供应商', { exact: true }).fill('')
+  await page
+    .getByRole('button', { name: '编辑 Kimi Code kimi-for-coding 单价', exact: true })
+    .click()
+  await page.getByLabel('输入单价（CNY / 百万 token）', { exact: true }).fill('99')
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await priceRow.getByRole('cell', { name: '1.25 CNY · 手动', exact: true }).waitFor()
+  await page.getByRole('button', { name: '编辑 Kimi Code k3 单价', exact: true }).click()
+  await page.getByRole('button', { name: '搜索并匹配模型', exact: true }).click()
+  await page.getByLabel('搜索 Models.dev 模型', { exact: true }).fill('kimi_for_coding')
+  await page
+    .getByRole('button', { name: '应用 kimi-for-coding / kimi-for-coding 价格', exact: true })
+    .click()
+  await page.getByText('已匹配：kimi-for-coding / kimi-for-coding', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '保存单价', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  assert.equal(
+    (await page.evaluate(() => window.kimiHelper.getGateway())).modelPrices.find(
+      (p) => p.model === 'k3'
+    ).catalogMatch.model,
+    'kimi-for-coding'
+  )
+  await page.getByRole('button', { name: '编辑 Kimi Code k3 单价', exact: true }).click()
+  await page.getByRole('button', { name: '搜索并匹配模型', exact: true }).click()
+  await page.getByLabel('搜索 Models.dev 模型', { exact: true }).fill('missing-model')
+  await page
+    .getByText('没有找到相关模型，可更换关键词，或在下方直接输入价格。', { exact: true })
+    .waitFor()
+  await page.getByLabel('输入单价（USD / 百万 token）', { exact: true }).fill('99')
+  await page.screenshot({ path: join(artifacts, 'price-model-matching.png') })
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  assert.equal(
+    (await page.evaluate(() => window.kimiHelper.getGateway())).modelPrices.find(
+      (p) => p.model === 'k3'
+    ).input,
+    null
+  )
+  await page.getByRole('tab', { name: /账号池/ }).click()
   const accountSnapshot = await page.evaluate(() => window.kimiHelper.getGateway())
   assert.equal(accountSnapshot.accounts.length, 2)
   assert.equal(accountSnapshot.accounts.find((a) => a.name === '开发账号 A').maxConcurrency, 5)
@@ -313,7 +416,52 @@ try {
   assert.equal(await autoRefresh.textContent(), '5s')
   await page.locator('.workspace').evaluate((el) => el.scrollTo(0, 0))
   await page.screenshot({ path: join(artifacts, 'usage.png') })
+  const quotaCards = page.locator('.overview-account-card')
+  const logo = page.getByRole('button', { name: '长按 开发账号 A Logo 拖动排序', exact: true })
+  await logo.click()
+  assert.equal(await page.locator('.quota-drag-ghost').count(), 0)
+  const logoBounds = await logo.boundingBox()
+  const destinationBounds = await page
+    .getByRole('article', { name: '开发账号 B 额度', exact: true })
+    .boundingBox()
+  await page.mouse.move(logoBounds.x + logoBounds.width / 2, logoBounds.y + logoBounds.height / 2)
+  await page.mouse.down()
+  await page.waitForSelector('.quota-drag-ghost')
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await page.waitForSelector('.quota-drag-ghost', { state: 'detached' })
+  assert.equal(await quotaCards.first().getAttribute('aria-label'), '开发账号 A 额度')
+  await page.mouse.down()
+  await page.waitForSelector('.quota-drag-ghost')
+  await page.evaluate(() => {
+    window.__nativeDragCount = 0
+    document.addEventListener('dragstart', () => window.__nativeDragCount++)
+  })
+  await page.mouse.move(
+    destinationBounds.x + destinationBounds.width / 2,
+    destinationBounds.y + 50,
+    { steps: 10 }
+  )
+  assert.equal(await page.evaluate(() => window.__nativeDragCount), 0)
+  const ghostBounds = await page.locator('.quota-drag-ghost').boundingBox()
+  assert.ok(ghostBounds.x > logoBounds.x + 100, 'dragged card follows the pointer')
+  await page.mouse.up()
+  await page.waitForSelector('.quota-drag-ghost', { state: 'detached' })
+  await page.waitForFunction(
+    () =>
+      document.querySelector('.overview-account-card')?.getAttribute('aria-label') ===
+      '开发账号 B 额度'
+  )
+  assert.equal(await quotaCards.first().getAttribute('aria-label'), '开发账号 B 额度')
+  await page.screenshot({ path: join(artifacts, 'quota-card-order.png') })
   const heatmap = page.getByRole('region', { name: '每日消耗热力图', exact: true })
+  await heatmap
+    .getByLabel('历史活动统计', { exact: true })
+    .getByText('最长连续天数', { exact: true })
+    .waitFor()
+  await page.waitForFunction(() =>
+    document.querySelector('.activity-summary')?.textContent.includes('1 天')
+  )
   await heatmap.locator('.heatmap-day.is-today').waitFor()
   await heatmap.locator('.heatmap-day.is-today').hover()
   await heatmap.getByRole('tooltip').waitFor()
@@ -408,6 +556,36 @@ try {
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark')
   await page.getByRole('button', { name: '停止网关', exact: true }).waitFor()
   const restoredGateway = await page.evaluate(() => window.kimiHelper.getGateway())
+  assert.equal(restoredGateway.modelPriceCatalog.prices.length, 2)
+  assert.equal(restoredGateway.modelPriceCatalog.error, '')
+  assert.equal(
+    restoredGateway.modelPrices.find((p) => p.model === 'k3').catalogMatch.model,
+    'kimi-for-coding'
+  )
+  assert.deepEqual(
+    restoredGateway.modelPrices.filter((p) => p.model === 'kimi-for-coding'),
+    [
+      {
+        provider: 'kimi',
+        model: 'kimi-for-coding',
+        currency: 'CNY',
+        input: 1.25,
+        output: 8,
+        cacheRead: 0,
+        cacheWrite: null
+      }
+    ]
+  )
+  assert.deepEqual(
+    restoredGateway.quotaCardOrder,
+    ['开发账号 B', '开发账号 A'].map(
+      (name) => restoredGateway.accounts.find((a) => a.name === name).id
+    )
+  )
+  assert.equal(
+    await page.locator('.overview-account-card').first().getAttribute('aria-label'),
+    '开发账号 B 额度'
+  )
   assert.equal(restoredGateway.accounts.length, 2)
   assert.equal(restoredGateway.groups.length, 1)
   assert.equal(restoredGateway.settings.port, gatewayPort)
@@ -423,6 +601,19 @@ try {
   assert.equal(restoredResponse.status, 200)
   await restoredResponse.text()
   await page.getByRole('tab', { name: '请求记录' }).click()
+  await page.getByRole('columnheader', { name: '费用', exact: true }).waitFor()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'requestId:' })
+    .first()
+    .getByRole('button', { name: '查看请求费用明细', exact: true })
+    .hover()
+  const costTooltip = page.getByRole('tooltip').filter({ hasText: '请求费用明细' })
+  await costTooltip.getByText('缓存读取', { exact: true }).waitFor()
+  await costTooltip.getByText('800', { exact: true }).waitFor()
+  await page.screenshot({ path: join(artifacts, 'request-cost-tooltip.png') })
+  await page.getByRole('columnheader', { name: '时间', exact: true }).hover()
+  await costTooltip.waitFor({ state: 'hidden' })
   await page.getByText('模型列表', { exact: true }).waitFor()
   // 重启后旧请求仍可查看；新增请求通过 10 条游标分页访问。
   assert.equal(restoredGateway.requests.length, 4)
@@ -656,6 +847,28 @@ try {
   )
   await page.screenshot({ path: join(artifacts, 'peak-offpeak-performance.png') })
   assert.deepEqual(errors, [])
+  // A second before-quit listener can cancel the final quit; the still-visible UI
+  // must retain access to its history database after the gateway has shut down.
+  await application.evaluate(
+    ({ app }) =>
+      new Promise((resolve) => {
+        let attempts = 0
+        const cancelFinalQuit = (event) => {
+          attempts++
+          if (attempts === 2) {
+            event.preventDefault()
+            app.removeListener('before-quit', cancelFinalQuit)
+            resolve()
+          }
+        }
+        app.on('before-quit', cancelFinalQuit)
+        app.quit()
+      })
+  )
+  // The history handler still uses the real database (the usage handler above is a fixture).
+  await page.evaluate(async () => {
+    await window.kimiHelper.getRequestHistory()
+  })
   console.log(
     '通过：真实 Electron、进程隔离、主题、统一账号管理、系统加密存储、真实 HTTP 负载均衡、重启恢复与自动启动、请求记录及最小窗口布局。'
   )

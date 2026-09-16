@@ -1,14 +1,19 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import { heatmapLevel, localDayKey, type UsageStats } from '../../shared/usage'
+import { formatUsageCost, heatmapLevel, localDayKey, type UsageStats } from '../../shared/usage'
 
 const tokens = (value: number | null) => (value == null ? '未知' : value.toLocaleString('zh-CN'))
-const cost = (value: number | null) => (value == null ? '未知' : `$${value.toFixed(4)}`)
 const compactTokens = (value: number) =>
   new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 const tooltipDate = (time: number) =>
   new Date(time).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
 
-export function UsageHeatmap({ data }: { data: UsageStats | undefined }) {
+export function UsageHeatmap({
+  data,
+  loading = true
+}: {
+  data: UsageStats | undefined
+  loading?: boolean
+}) {
   const [mode, setMode] = useState<'daily' | 'weekly' | 'cumulative'>('daily')
   const scroll = useRef<HTMLDivElement>(null)
   const panel = useRef<HTMLElement>(null)
@@ -109,6 +114,40 @@ export function UsageHeatmap({ data }: { data: UsageStats | undefined }) {
         if (event.key === 'Escape') setHover(undefined)
       }}
     >
+      <div className="activity-summary" aria-label="历史活动统计">
+        {[
+          {
+            label: '累计 Token 数',
+            value: data?.activity ? compactTokens(data.activity.totalTokens) : '—',
+            hint: '全部历史模型请求的输入、输出及缓存 token 总和，未报告用量按 0 计'
+          },
+          {
+            label: '峰值 Token 数',
+            value: data?.activity ? compactTokens(data.activity.peakTokens) : '—',
+            hint: '本地自然日内最高的 token 总量'
+          },
+          {
+            label: '最长聊天时长',
+            value: data?.activity ? formatChatDuration(data.activity.longestChatMs) : '—',
+            hint: '按同一会话 ID 的首次请求开始至最后一次请求结束计算，不受粘性窗口、账号或模型切换影响；旧记录或未提供会话 ID 的请求不参与此项统计'
+          },
+          {
+            label: '当前连续天数',
+            value: data?.activity ? `${data.activity.currentStreak} 天` : '—',
+            hint: '连续有模型请求的本地日期；今天尚未使用时从昨天起算'
+          },
+          {
+            label: '最长连续天数',
+            value: data?.activity ? `${data.activity.longestStreak} 天` : '—',
+            hint: '全部历史中连续有模型请求的最长天数'
+          }
+        ].map((item) => (
+          <div key={item.label} title={item.hint}>
+            <strong>{item.value}</strong>
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
       <div className="usage-trend-heading">
         <h3>Token 活动</h3>
         <div className="heatmap-modes" role="group" aria-label="Token 活动统计方式">
@@ -145,7 +184,7 @@ export function UsageHeatmap({ data }: { data: UsageStats | undefined }) {
                   row = ((index + offset) % 7) + 1
                 const unknown = day.requests > 0 && day.totalTokens === null
                 const bubble = `${tooltipDate(day.time)} ${unknown ? '用量未知' : `使用了 ${compactTokens(day.totalTokens ?? 0)} 个 Token`}${day.reported < day.requests && !unknown ? '（部分用量未知）' : ''}`
-                const title = `${key}\n${day.requests} 次请求 · ${tokens(day.totalTokens ?? (day.requests === 0 ? 0 : null))} tokens\n已报告用量 ${day.reported}/${day.requests} · 成本 ${cost(day.cost)}\n中断 ${day.interruptedRequests} 次`
+                const title = `${key}\n${day.requests} 次请求 · ${tokens(day.totalTokens ?? (day.requests === 0 ? 0 : null))} tokens\n已报告用量 ${day.reported}/${day.requests} · 成本 ${formatUsageCost(day)}\n中断 ${day.interruptedRequests} 次`
                 return (
                   <div className="heatmap-day-wrapper" key={key}>
                     <button
@@ -197,7 +236,9 @@ export function UsageHeatmap({ data }: { data: UsageStats | undefined }) {
           {hover.text}
         </div>
       )}
-      {!data && <p className="muted">正在加载消耗记录…</p>}
+      {!data && (
+        <p className="muted">{loading ? '正在加载消耗记录…' : '消耗记录暂不可用，请重试'}</p>
+      )}
       {selected !== undefined && mode === 'daily' && (
         <div className="heatmap-detail">
           {
@@ -221,7 +262,7 @@ export function UsageHeatmap({ data }: { data: UsageStats | undefined }) {
                     {tokens(
                       detail.summary.totalTokens ?? (detail.summary.requests === 0 ? 0 : null)
                     )}{' '}
-                    tokens · 成本 {cost(detail.summary.cost)} · 中断{' '}
+                    tokens · 成本 {formatUsageCost(detail.summary)} · 中断{' '}
                     {detail.summary.interruptedRequests} 次
                   </p>
                   {detail.byModel.length > 0 && (
@@ -249,7 +290,7 @@ export function UsageHeatmap({ data }: { data: UsageStats | undefined }) {
                                   : `${model.averageTokensPerSecond.toFixed(1)} tokens/s`}
                               </td>
                               <td>{model.interruptedRequests}</td>
-                              <td>{cost(model.cost)}</td>
+                              <td>{formatUsageCost(model)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -264,4 +305,12 @@ export function UsageHeatmap({ data }: { data: UsageStats | undefined }) {
       )}
     </section>
   )
+}
+
+function formatChatDuration(ms: number | null): string {
+  if (ms === null) return '暂无会话数据'
+  if (ms <= 0) return '0 分钟'
+  if (ms < 60000) return '不足 1 分钟'
+  const minutes = Math.floor(ms / 60000)
+  return minutes >= 60 ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分` : `${minutes} 分钟`
 }

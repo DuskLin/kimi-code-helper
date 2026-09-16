@@ -1,9 +1,10 @@
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { RequestHistoryPage, RequestRecord } from '../../shared/contracts'
+import type { GatewaySnapshot, RequestHistoryPage, RequestRecord } from '../../shared/contracts'
 import type { UsageQuery, UsageStats, UsageTotals } from '../../shared/usage'
-import { localDayKey } from '../../shared/usage'
+import { requestCost } from '../../shared/request-cost'
+import { localDayKey, summarizeActivity } from '../../shared/usage'
 
 /** 永久保存请求摘要；按游标分页，避免将全部历史加载进内存。 */
 export class RequestHistory {
@@ -50,7 +51,29 @@ export class RequestHistory {
   close(): void {
     this.db.close()
   }
-  usage(query: UsageQuery): UsageStats {
+  usage(
+    query: UsageQuery,
+    pricing?: Pick<GatewaySnapshot, 'accounts' | 'modelPrices' | 'modelPriceCatalog'>
+  ): UsageStats {
+    const costs = new Map<string, string>()
+    if (pricing)
+      this.db.function('request_cost', (raw) => {
+        const key = String(raw)
+        let value = costs.get(key)
+        if (value === undefined) {
+          const calculated = requestCost(JSON.parse(key) as RequestRecord, pricing)
+          value = JSON.stringify(
+            Object.fromEntries(calculated.amounts.map((p) => [p.currency, p.value]))
+          )
+          costs.set(key, value)
+        }
+        return value
+      })
+    const usdCost = pricing
+      ? "json_extract(request_cost(record), '$.USD')"
+      : "json_extract(record, '$.usage.cost')"
+    const cnyCost = pricing ? "json_extract(request_cost(record), '$.CNY')" : 'NULL'
+
     if (query?.allHistory !== undefined && typeof query.allHistory !== 'boolean')
       throw new Error('统计时间范围无效')
     if (
@@ -115,13 +138,14 @@ export class RequestHistory {
       SUM(CASE WHEN ${interrupted} THEN 1 ELSE 0 END) AS interruptedRequests,
       SUM(CASE WHEN ${interrupted} AND ${tokensKnown} THEN 1 ELSE 0 END) AS interruptedReported,
       SUM(CASE WHEN ${interrupted} AND ${tokensKnown} THEN ${tokenSum} ELSE NULL END) AS interruptedTokens,
-      SUM(CASE WHEN ${interrupted} THEN json_extract(record, '$.usage.cost') ELSE NULL END) AS interruptedCost,
+      SUM(CASE WHEN ${interrupted} THEN ${usdCost} ELSE NULL END) AS interruptedCost,
+      SUM(CASE WHEN ${interrupted} THEN ${cnyCost} ELSE NULL END) AS interruptedCostCny,
       SUM(CASE WHEN json_type(record, '$.usage') = 'object' THEN 1 ELSE 0 END) AS reported,
       SUM(json_extract(record, '$.usage.input')) AS input,
       SUM(json_extract(record, '$.usage.output')) AS output,
       SUM(json_extract(record, '$.usage.cacheRead')) AS cacheRead,
       SUM(json_extract(record, '$.usage.cacheWrite')) AS cacheWrite,
-      SUM(json_extract(record, '$.usage.cost')) AS cost`
+      SUM(${usdCost}) AS cost, SUM(${cnyCost}) AS costCny`
     const totals = (row: Record<string, unknown>): UsageTotals => {
       const num = (key: string): number | null => (row[key] == null ? null : Number(row[key]))
       const input = num('input'),
@@ -153,6 +177,26 @@ export class RequestHistory {
         cacheRead,
         cacheWrite,
         cost: num('cost'),
+        ...(pricing
+          ? {
+              costAmounts: [
+                ...(num('cost') !== null
+                  ? [{ currency: 'USD' as const, value: num('cost')! }]
+                  : []),
+                ...(num('costCny') !== null
+                  ? [{ currency: 'CNY' as const, value: num('costCny')! }]
+                  : [])
+              ],
+              interruptedCostAmounts: [
+                ...(num('interruptedCost') !== null
+                  ? [{ currency: 'USD' as const, value: num('interruptedCost')! }]
+                  : []),
+                ...(num('interruptedCostCny') !== null
+                  ? [{ currency: 'CNY' as const, value: num('interruptedCostCny')! }]
+                  : [])
+              ]
+            }
+          : {}),
         totalTokens: known
           ? (input ?? 0) + (output ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
           : null,
@@ -235,6 +279,33 @@ export class RequestHistory {
           speedSamples: summary.speedSamples
         }
       })
-    return { summary, points, accounts, models, byModel, byAccount }
+    const activity =
+      query.allHistory && query.bucketMs === 86400000
+        ? summarizeActivity(
+            this.db
+              .prepare(
+                `SELECT json_extract(record, '$.time') AS time, json_extract(record, '$.durationMs') AS durationMs, json_extract(record, '$.sessionId') AS sessionId, COALESCE(json_extract(record, '$.accountId'), json_extract(record, '$.account'), '') AS account, ${tokenSum} AS tokens FROM requests ${where} AND COALESCE(json_extract(record, '$.model'), '') != ''`
+              )
+              .all(...values)
+              .map((row) => ({
+                time: Number(row.time),
+                durationMs: Number(row.durationMs ?? 0),
+                sessionId: row.sessionId == null ? undefined : String(row.sessionId),
+                account: String(row.account),
+                tokens: Number(row.tokens)
+              })),
+            Math.min(Date.now(), query.end - 1)
+          )
+        : undefined
+    costs.clear()
+    return {
+      summary,
+      points,
+      accounts,
+      models,
+      byModel,
+      byAccount,
+      ...(activity ? { activity } : {})
+    }
   }
 }

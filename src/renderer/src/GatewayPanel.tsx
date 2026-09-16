@@ -9,13 +9,15 @@ import {
   type ReactElement,
   type ReactNode
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
+  CircleHelp,
   Activity,
+  Coins,
   ArrowLeft,
   ArrowUpRight,
   Check,
   Copy,
-  Code2,
   Play,
   Plus,
   RotateCcw,
@@ -27,6 +29,8 @@ import {
   X
 } from 'lucide-react'
 import type {
+  ModelPrice,
+  ModelPriceCatalogSnapshot,
   AccountCapabilities,
   AccountQuota,
   QuotaWindow,
@@ -34,10 +38,18 @@ import type {
   AccountView,
   GatewaySettings,
   GatewaySnapshot,
+  RequestRecord,
   RequestHistoryPage
 } from '../../shared/contracts'
 
 import { DEFAULT_ACCOUNT_CONCURRENCY, accountBaseUrl } from '../../shared/contracts'
+import {
+  matchedModelPrice,
+  resolveModelPrice,
+  searchCatalogPrices
+} from '../../shared/model-pricing'
+import { useQuotaCardDrag } from './useQuotaCardDrag'
+import { requestCost, requestCostDetails } from '../../shared/request-cost'
 import { remainingRatio } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
 
@@ -123,7 +135,20 @@ function AccountPerformance({ stats }: { stats: UsageStats['byAccount'] }) {
 }
 function ProviderLogo({ provider }: { provider?: AccountInput['provider'] }) {
   if (provider === 'opencode-go')
-    return <Code2 className="opencode-go-logo" size={23} aria-label="OpenCode Go" />
+    return (
+      <svg
+        className="opencode-go-logo"
+        width={23}
+        height={23}
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        fillRule="evenodd"
+        role="img"
+        aria-label="OpenCode Go"
+      >
+        <path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" />
+      </svg>
+    )
   return provider === 'deepseek' ? (
     <img className="deepseek-logo" src={deepseekLogo} alt="DeepSeek" />
   ) : (
@@ -366,7 +391,7 @@ export function GatewayPanel({
   const [accountSpeeds, setAccountSpeeds] = useState<UsageStats['byAccount']>([])
   const [usageRefreshInterval, setUsageRefreshInterval] = useState(5000)
   const [page, setPage] = useState<'overview' | 'management'>('overview')
-  const [tab, setTab] = useState<'accounts' | 'activity'>('accounts')
+  const [tab, setTab] = useState<'accounts' | 'activity' | 'pricing'>('accounts')
   const [history, setHistory] = useState<RequestHistoryPage>()
   const [historyCursors, setHistoryCursors] = useState<(number | undefined)[]>([undefined])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -475,6 +500,16 @@ export function GatewayPanel({
       setBusy(false)
     }
   }
+  const savedCardOrder = new Map((snapshot?.quotaCardOrder ?? []).map((id, index) => [id, index]))
+  const cardIds = (snapshot?.accounts ?? [])
+    .filter((account) => account.hasCredential)
+    .sort((a, b) => (savedCardOrder.get(a.id) ?? Infinity) - (savedCardOrder.get(b.id) ?? Infinity))
+    .map((account) => account.id)
+  const cardDrag = useQuotaCardDrag(
+    cardIds,
+    (ids) => action(() => api.saveQuotaCardOrder(ids), '卡片顺序已保存'),
+    busy
+  )
   if (!snapshot)
     return (
       <div className="loading-state" role={connectionError ? 'alert' : 'status'}>
@@ -500,7 +535,19 @@ export function GatewayPanel({
   })
   const copy = (format: 'url' | 'key' | 'kimi' | 'anthropic') =>
     void action(() => api.copyConnection({ groupId: group.id, format }), '已复制到剪贴板')
-  const linkedAccounts = snapshot.accounts.filter((account) => account.hasCredential)
+  const order = new Map(cardDrag.order.map((id, index) => [id, index]))
+  const linkedAccounts = snapshot.accounts
+    .filter((account) => account.hasCredential)
+    .sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity))
+  const moveCard = (from: string, to: string) => {
+    const ids = linkedAccounts.map((account) => account.id)
+    const source = ids.indexOf(from),
+      destination = ids.indexOf(to)
+    if (source < 0 || destination < 0 || source === destination || busy) return
+    ids.splice(source, 1)
+    ids.splice(destination, 0, from)
+    void action(() => api.saveQuotaCardOrder(ids), '卡片顺序已保存')
+  }
   const stopBlocked = snapshot.running && snapshot.activeRequestCount > 0
   return (
     <div className="gateway-workspace">
@@ -579,21 +626,47 @@ export function GatewayPanel({
               </button>
             </div>
           ) : (
-            <div className="overview-quota-grid">
+            <div className="overview-quota-grid" ref={cardDrag.grid}>
               {linkedAccounts.map((account) => {
                 const status = accountStatus(account)
                 const speeds = accountSpeeds.filter((item) => item.accountId === account.id)
                 return (
                   <article
                     key={account.id}
-                    className="overview-account-card"
+                    data-quota-id={account.id}
+                    className={`overview-account-card${cardDrag.dragging === account.id ? ' is-dragging' : ''}`}
                     aria-label={`${account.name} 额度`}
                   >
                     <div className="overview-account-heading">
                       <div className="account-name">
-                        <span className="account-avatar">
+                        <button
+                          type="button"
+                          className="account-avatar quota-logo-handle"
+                          draggable={false}
+                          disabled={busy}
+                          aria-label={`长按 ${account.name} Logo 拖动排序`}
+                          title="长按 Logo 拖动排序；也可使用方向键移动"
+                          onMouseDown={(event) => cardDrag.pointerDown(event, account.id)}
+                          onContextMenu={(event) => event.preventDefault()}
+                          onDragStart={(event) => event.preventDefault()}
+                          onKeyDown={(event) => {
+                            const delta = ['ArrowLeft', 'ArrowUp'].includes(event.key)
+                              ? -1
+                              : ['ArrowRight', 'ArrowDown'].includes(event.key)
+                                ? 1
+                                : 0
+                            if (delta) {
+                              event.preventDefault()
+                              const target =
+                                linkedAccounts[
+                                  linkedAccounts.findIndex((a) => a.id === account.id) + delta
+                                ]
+                              if (target) moveCard(account.id, target.id)
+                            }
+                          }}
+                        >
                           <ProviderLogo provider={account.provider} />
-                        </span>
+                        </button>
                         <div>
                           <strong>{account.name}</strong>
                         </div>
@@ -650,7 +723,8 @@ export function GatewayPanel({
               {(
                 [
                   ['accounts', '账号池', Users],
-                  ['activity', '请求记录', Activity]
+                  ['activity', '请求记录', Activity],
+                  ['pricing', 'AI 费用管理', Coins]
                 ] as const
               ).map(([id, name, Icon]) => (
                 <button role="tab" aria-selected={tab === id} key={id} onClick={() => setTab(id)}>
@@ -906,6 +980,7 @@ export function GatewayPanel({
                 </div>
               </>
             )}
+            {tab === 'pricing' && <ModelPricing snapshot={snapshot} saved={setSnapshot} />}
             {tab === 'activity' && (
               <>
                 <div className="section-toolbar">
@@ -940,6 +1015,7 @@ export function GatewayPanel({
                             首字耗时
                           </th>
                           <th>总耗时</th>
+                          <th>费用</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -966,6 +1042,9 @@ export function GatewayPanel({
                             </td>
                             <td>
                               <span className="latency-value">{formatLatency(r.durationMs)}</span>
+                            </td>
+                            <td>
+                              <RequestCostCell record={r} snapshot={snapshot} />
                             </td>
                           </tr>
                         ))}
@@ -1477,5 +1556,558 @@ function SettingsEditor({
         </div>
       </form>
     </Modal>
+  )
+}
+
+const priceFields = [
+  ['input', '输入单价'],
+  ['output', '输出单价'],
+  ['cacheRead', '缓存读取'],
+  ['cacheWrite', '缓存写入']
+] as const
+const providerNames = { kimi: 'Kimi Code', deepseek: 'DeepSeek', 'opencode-go': 'OpenCode Go' }
+
+function ModelPricing({
+  snapshot,
+  saved
+}: {
+  snapshot: GatewaySnapshot
+  saved: (data: GatewaySnapshot) => void
+}) {
+  const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState<ModelPrice>()
+  const [notice, setNotice] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState('')
+  const refreshLock = useRef(false)
+  const mounted = useRef(false)
+  async function refresh(force = false) {
+    if (refreshLock.current) return
+    refreshLock.current = true
+    setRefreshing(true)
+    setRefreshError('')
+    try {
+      const data = await api.refreshModelPrices(force)
+      if (mounted.current) saved(data)
+    } catch (e) {
+      if (mounted.current) setRefreshError(errorText(e))
+    } finally {
+      refreshLock.current = false
+      if (mounted.current) setRefreshing(false)
+    }
+  }
+  useEffect(() => {
+    mounted.current = true
+    void refresh()
+    const timer = setInterval(() => void refresh(), 60 * 60 * 1000)
+    return () => {
+      mounted.current = false
+      clearInterval(timer)
+    }
+  }, [])
+  const catalog = snapshot.modelPriceCatalog
+  const fallbackFor = (price: ModelPrice) => matchedModelPrice(price, catalog)
+  const models = new Map<string, ModelPrice>()
+  for (const account of snapshot.accounts) {
+    const provider = account.provider ?? 'kimi'
+    for (const model of account.models) {
+      const key = JSON.stringify([provider, model])
+      if (!models.has(key))
+        models.set(
+          key,
+          snapshot.modelPrices?.find((p) => p.provider === provider && p.model === model) ?? {
+            provider,
+            model,
+            currency: catalog?.prices.some((p) => p.provider === provider && p.model === model)
+              ? 'USD'
+              : 'CNY',
+            input: null,
+            output: null,
+            cacheRead: null,
+            cacheWrite: null
+          }
+        )
+    }
+  }
+  const rows = [...models.values()].sort(
+    (a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)
+  )
+  const filtered = rows.filter((p) =>
+    `${providerNames[p.provider]} ${p.model}`.toLowerCase().includes(search.trim().toLowerCase())
+  )
+  return (
+    <>
+      <div className="section-toolbar pricing-toolbar">
+        <div>
+          <strong>模型单价</strong>
+          <p className="muted">
+            每百万 token · 手动值优先，留空使用 API 默认值；没有价格时按 0 计费。
+          </p>
+        </div>
+        <div className="toolbar">
+          <input
+            aria-label="搜索模型或供应商"
+            placeholder="搜索模型或供应商"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button className="button" disabled={refreshing} onClick={() => void refresh(true)}>
+            <RotateCcw size={14} />
+            {refreshing ? '正在获取…' : '刷新默认价格'}
+          </button>
+        </div>
+      </div>
+      <p className="pricing-footnote muted">
+        来源：Models.dev · USD / 百万 token ·{' '}
+        {catalog?.updatedAt
+          ? `上次更新 ${new Date(catalog.updatedAt).toLocaleString()}`
+          : '尚未获取默认价格'}{' '}
+        · 缓存 24 小时
+      </p>
+      {(refreshError || catalog?.error) && (
+        <p className="pricing-notice form-error" role="alert">
+          {refreshError || catalog?.error}
+        </p>
+      )}
+      {notice && (
+        <p className="pricing-notice" role="status">
+          {notice}
+        </p>
+      )}
+      {!filtered.length ? (
+        <div className="empty-state">
+          <Coins size={26} />
+          <h3>{rows.length ? '没有匹配的模型' : '暂无已支持模型'}</h3>
+          <p>
+            {rows.length
+              ? '请尝试其他模型名或供应商。'
+              : '添加账号并获取上游信息后，模型会自动出现在这里。'}
+          </p>
+        </div>
+      ) : (
+        <div className="table-scroll">
+          <table className="pricing-table" aria-label="模型单价">
+            <thead>
+              <tr>
+                <th>供应商</th>
+                <th>模型</th>
+                {priceFields.map(([key, label]) => (
+                  <th key={key}>{label}</th>
+                ))}
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((price) => {
+                const fallback = fallbackFor(price)
+                return (
+                  <tr key={JSON.stringify([price.provider, price.model])}>
+                    <td>{providerNames[price.provider]}</td>
+                    <td className="model-cell">
+                      {price.model}
+                      {fallback?.tiered && (
+                        <small className="pricing-source">API 为基础档价格</small>
+                      )}
+                    </td>
+                    {priceFields.map(([key]) => {
+                      const value = resolveModelPrice(price, fallback, key)
+                      return (
+                        <td key={key}>
+                          {value ? (
+                            <>
+                              {value.amount}
+                              <small className="pricing-source">
+                                {value.currency} ·{' '}
+                                {value.source === 'manual'
+                                  ? '手动'
+                                  : value.source === 'api'
+                                    ? 'API 默认'
+                                    : '默认 0'}
+                              </small>
+                            </>
+                          ) : (
+                            <span className="muted">未设置</span>
+                          )}
+                        </td>
+                      )
+                    })}
+                    <td>
+                      <button
+                        className="text-button"
+                        aria-label={`编辑 ${providerNames[price.provider]} ${price.model} 单价`}
+                        onClick={() => {
+                          setNotice('')
+                          setEditing(price)
+                        }}
+                      >
+                        编辑
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="pricing-footnote muted">
+        共 {rows.length} 个模型 · 手动填写 0
+        也会覆盖默认值；不同币种分别标注，不自动换算。订阅模型价格仅作参考，不代表订阅费用；阶梯计价模型仅展示基础档。
+      </p>
+      {editing && (
+        <ModelPriceEditor
+          input={editing}
+          catalog={catalog}
+          close={() => setEditing(undefined)}
+          saved={(data) => {
+            saved(data)
+            setEditing(undefined)
+            setNotice('模型单价已保存')
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+function ModelPriceEditor({
+  input,
+  catalog,
+  close,
+  saved
+}: {
+  input: ModelPrice
+  catalog: ModelPriceCatalogSnapshot | undefined
+  close: () => void
+  saved: (data: GatewaySnapshot) => void
+}) {
+  const [catalogMatch, setCatalogMatch] = useState(input.catalogMatch)
+  const [query, setQuery] = useState(input.catalogMatch?.model ?? input.model)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const fallback = matchedModelPrice({ ...input, catalogMatch }, catalog)
+  const results = searchOpen ? searchCatalogPrices(catalog?.entries ?? [], query) : []
+  const [currency, setCurrency] = useState(input.currency)
+  const [amounts, setAmounts] = useState(() =>
+    Object.fromEntries(
+      priceFields.map(([key]) => [key, input[key] === null ? '' : String(input[key])])
+    )
+  )
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const lock = useRef(false)
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    if (lock.current) return
+    lock.current = true
+    setBusy(true)
+    setError('')
+    try {
+      const values = Object.fromEntries(
+        priceFields.map(([key]) => [key, amounts[key].trim() === '' ? null : Number(amounts[key])])
+      ) as Pick<ModelPrice, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>
+      saved(await api.saveModelPrice({ ...input, ...values, currency, catalogMatch }))
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      lock.current = false
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      title="编辑模型单价"
+      close={() => {
+        if (!lock.current) close()
+      }}
+    >
+      <form onSubmit={(e) => void submit(e)}>
+        <p>
+          <strong>{input.model}</strong>
+          <br />
+          <span className="muted">{providerNames[input.provider]} · 每百万 token</span>
+        </p>
+        <fieldset disabled={busy}>
+          <section className="price-match-picker">
+            <div className="model-protocols-heading">
+              <strong>匹配 Models.dev 价格</strong>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setSearchOpen(!searchOpen)}
+              >
+                {searchOpen ? '收起搜索' : '搜索并匹配模型'}
+              </button>
+            </div>
+            <p className="muted">
+              {catalogMatch
+                ? `已匹配：${catalogMatch.provider} / ${catalogMatch.model}`
+                : '当前按供应商与模型 ID 自动匹配，可搜索并选择其他对应模型。'}
+            </p>
+            {catalogMatch && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setCatalogMatch(undefined)}
+              >
+                取消匹配，恢复自动识别
+              </button>
+            )}
+            {searchOpen && (
+              <>
+                <Field
+                  label="搜索 Models.dev 模型"
+                  hint="支持模型 ID、名称和供应商；可忽略连字符、空格等差异。不同供应商的价格可能不同。"
+                >
+                  <input
+                    type="search"
+                    value={query}
+                    placeholder="例如 kimi k3、DeepSeek、Claude"
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </Field>
+                {!results.length ? (
+                  <p className="muted" role="status">
+                    {catalog?.entries?.length
+                      ? '没有找到相关模型，可更换关键词，或在下方直接输入价格。'
+                      : '价格目录尚不可用，请返回列表刷新默认价格，或直接输入价格。'}
+                  </p>
+                ) : (
+                  <>
+                    <p className="muted">
+                      找到 {results.length} 项
+                      {results.length > 40 ? '，显示前 40 项，请缩小搜索范围' : ''} · USD / 百万
+                      token
+                    </p>
+                    <div className="price-match-results">
+                      {results.slice(0, 40).map((entry) => (
+                        <div
+                          className="price-match-result"
+                          key={JSON.stringify([entry.provider, entry.model])}
+                        >
+                          <div>
+                            <strong>{entry.name}</strong>
+                            <small>
+                              {entry.providerName} · {entry.provider} / {entry.model}
+                            </small>
+                            <small>
+                              {priceFields
+                                .map(([key, label]) => `${label} ${entry[key] ?? 0}`)
+                                .join(' · ')}
+                              {entry.tiered ? ' · 基础档价格' : ''}
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            className="button"
+                            aria-label={`应用 ${entry.provider} / ${entry.model} 价格`}
+                            onClick={() => {
+                              setCatalogMatch({ provider: entry.provider, model: entry.model })
+                              setCurrency('USD')
+                              setAmounts(Object.fromEntries(priceFields.map(([key]) => [key, ''])))
+                              setSearchOpen(false)
+                            }}
+                          >
+                            应用价格
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <p className="muted">
+                  应用后将清空当前手动值，使用所选模型的默认价格并跟随更新；点击「保存单价」后生效。
+                </p>
+              </>
+            )}
+          </section>
+          <Field label="币种" hint="切换币种只修改标记，不会换算已填单价。">
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value as ModelPrice['currency'])}
+            >
+              <option value="CNY">人民币（CNY）</option>
+              <option value="USD">美元（USD）</option>
+            </select>
+          </Field>
+          <div className="form-grid">
+            {priceFields.map(([key, label]) => (
+              <Field
+                key={key}
+                label={`${label}（${currency} / 百万 token）`}
+                hint={
+                  fallback?.[key] != null
+                    ? `留空使用 API 默认：${fallback[key]} USD / 百万 token`
+                    : 'API 未提供此单价，留空按 0 计费'
+                }
+              >
+                <input
+                  type="number"
+                  min="0"
+                  max="1000000000"
+                  step="any"
+                  placeholder={
+                    fallback?.[key] != null ? `API 默认：${fallback[key]} USD` : '默认：0'
+                  }
+                  value={amounts[key]}
+                  onChange={(e) => setAmounts((old) => ({ ...old, [key]: e.target.value }))}
+                />
+              </Field>
+            ))}
+          </div>
+          <p className="muted">
+            输入单价指未命中缓存的输入；只填写要覆盖的值，留空使用 API 默认值，0 表示免费。
+          </p>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              setAmounts(Object.fromEntries(priceFields.map(([key]) => [key, ''])))
+              if (fallback) setCurrency(fallback.currency)
+            }}
+          >
+            恢复 API 默认值
+          </button>
+        </fieldset>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="button" disabled={busy} onClick={close}>
+            取消
+          </button>
+          <button className="button primary" disabled={busy}>
+            {busy ? '正在保存…' : '保存单价'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function formatRequestMoney(value: number) {
+  return value > 0 && value < 0.000001
+    ? '<0.000001'
+    : value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+}
+
+function RequestCostCell({
+  record,
+  snapshot
+}: {
+  record: RequestRecord
+  snapshot: GatewaySnapshot
+}) {
+  const cost = requestCost(record, snapshot)
+  const details = requestCostDetails(record, snapshot)
+  const id = useId()
+  const button = useRef<HTMLButtonElement>(null)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number }>()
+  const show = () => {
+    clearTimeout(timer.current)
+    const bounds = button.current?.getBoundingClientRect()
+    if (!bounds) return
+    setPosition({
+      left: Math.max(12, Math.min(bounds.right - 500, window.innerWidth - 512)),
+      ...(bounds.top > 300
+        ? { bottom: window.innerHeight - bounds.top + 8 }
+        : { top: bounds.bottom + 8 })
+    })
+  }
+  const hide = () => {
+    timer.current = setTimeout(() => setPosition(undefined), 120)
+  }
+  useEffect(() => {
+    const close = () => setPosition(undefined)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      clearTimeout(timer.current)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [])
+  return (
+    <span className="request-cost">
+      <span>
+        {cost.amounts.length
+          ? cost.amounts.map(({ currency, value }) => (
+              <span className="request-cost-amount" key={currency}>
+                {currency} {formatRequestMoney(value)}
+              </span>
+            ))
+          : '—'}
+      </span>
+      <button
+        ref={button}
+        type="button"
+        className="request-cost-help"
+        aria-label="查看请求费用明细"
+        aria-describedby={position ? id : undefined}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={() => setPosition(undefined)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setPosition(undefined)
+        }}
+      >
+        <CircleHelp size={14} />
+      </button>
+      {position &&
+        createPortal(
+          <div
+            id={id}
+            role="tooltip"
+            className="request-cost-tooltip"
+            style={position}
+            onMouseEnter={() => clearTimeout(timer.current)}
+            onMouseLeave={hide}
+          >
+            <strong>请求费用明细</strong>
+            <p className="muted">{record.model} · 单价按每百万 token 计</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>Token 数</th>
+                  <th>单价</th>
+                  <th>费用</th>
+                </tr>
+              </thead>
+              <tbody>
+                {details.map(({ field, tokens, price, subtotal }) => (
+                  <tr key={field}>
+                    <th>{priceFields.find(([key]) => key === field)![1].replace('单价', '')}</th>
+                    <td>{tokens.toLocaleString('en-US')}</td>
+                    <td>{price ? `${price.currency} ${price.amount}` : '0'}</td>
+                    <td>
+                      {subtotal === null
+                        ? '—'
+                        : `${price!.currency} ${formatRequestMoney(subtotal)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="request-cost-total">
+              {cost.source === 'reported' ? '上游报告总费用' : '合计'}：
+              {cost.amounts.length
+                ? cost.amounts
+                    .map((p) => `${p.currency} ${formatRequestMoney(p.value)}`)
+                    .join(' + ')
+                : '—'}
+            </p>
+            <p className="muted">
+              {cost.source === 'reported'
+                ? '总费用由上游报告；分项费用按当前配置单价计算，可能与上游账单不同。'
+                : cost.note.replaceAll('估算', '计算')}
+            </p>
+          </div>,
+          document.body
+        )}
+    </span>
   )
 }

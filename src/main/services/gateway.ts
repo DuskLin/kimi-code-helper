@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -18,6 +18,7 @@ import {
   validateProvider,
   validateGateway
 } from './gateway-store'
+import { ModelPriceCatalog } from './model-price-catalog'
 import { KimiCapabilities } from './kimi-capabilities'
 import { Scheduler } from './scheduler'
 import { FirstTokenObserver } from './first-token'
@@ -25,6 +26,7 @@ import { RequestHistory } from './request-history'
 import { ResponseIdsObserver, validRequestId } from './response-ids'
 import type { TokenUsage, UsageProtocol } from '../../shared/usage'
 import { QUOTA_REFRESH_MS } from '../../shared/kimi-quota'
+import { requestSessionId } from '../../shared/request-session'
 import { openCodeSession } from '../../shared/opencode-go'
 import { modelUpstreamRoute } from '../../shared/model-protocols'
 import {
@@ -90,6 +92,7 @@ async function bodyOf(req: IncomingMessage): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 export class Gateway {
+  readonly pricing: ModelPriceCatalog
   readonly scheduler = new Scheduler()
   private readonly capabilities: KimiCapabilities
   private server?: Server
@@ -106,6 +109,7 @@ export class Gateway {
     private readonly request: typeof fetch = fetch,
     metadataRequest: typeof fetch = request
   ) {
+    this.pricing = new ModelPriceCatalog(store.priceCachePath)
     this.capabilities = new KimiCapabilities(metadataRequest)
     this.history = new RequestHistory(store.historyPath)
     this.requests = this.history.page().records
@@ -115,6 +119,9 @@ export class Gateway {
     return {
       activeRequestCount: this.controllers.size,
       settings: data.settings,
+      modelPrices: data.modelPrices,
+      quotaCardOrder: data.quotaCardOrder,
+      modelPriceCatalog: this.pricing.snapshot(),
       groups: data.groups.map(({ key: _key, ...group }) => group),
       accounts: data.accounts.map(({ credential, ...account }) => ({
         ...account,
@@ -340,7 +347,9 @@ export class Gateway {
     let streamStartedAt: number | null = null
     let streamDurationMs: number | null = null
     let protocol: UsageProtocol | undefined
+    let sessionId: string | undefined
     let accountId: string | undefined
+    let provider: RequestRecord['provider']
     const controller = new AbortController()
     const settings = this.store.get().settings
     let disconnected = false
@@ -444,6 +453,11 @@ export class Gateway {
           session = payload.prompt_cache_key
         goSession = openCodeSession(req.headers, payload)
       }
+      const historySession = requestSessionId(req.headers, payload)
+      if (historySession)
+        sessionId = createHash('sha256')
+          .update(JSON.stringify([group.id, historySession]))
+          .digest('hex')
       if (session.length > 512) throw new HttpError(400, '会话标识超过 512 个字符')
       if (!session) session = goSession
       // 无会话字段时仅为本次请求生成，重试复用；不将所有客户端绑定到同一会话。
@@ -469,6 +483,7 @@ export class Gateway {
         excluded.add(account.id)
         accountName = account.name
         accountId = account.id
+        provider = account.provider ?? 'kimi'
         attempts++
         const attemptStarted = Date.now()
         const attemptStartedTick = performance.now()
@@ -740,6 +755,8 @@ export class Gateway {
           group: groupName,
           account: accountName,
           accountId,
+          sessionId,
+          provider,
           protocol,
           usage,
           interruption,

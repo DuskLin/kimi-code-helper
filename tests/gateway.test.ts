@@ -832,6 +832,13 @@ test('真实 HTTP 转发、分组密钥隔离与会话保持，凭据不出现�
     assert.ok(!snapshot.includes('secret-a'))
     assert.ok(!snapshot.includes(f.key))
     for (let i = 0; i < 3; i++) await (await f.post({}, { 'x-session-id': 'session-1' })).text()
+    const sessions = f.gateway.history
+      .page()
+      .records.slice(0, 3)
+      .map((r) => r.sessionId)
+    assert.equal(new Set(sessions).size, 1)
+    assert.match(sessions[0]!, /^[0-9a-f]{64}$/)
+    assert.notEqual(sessions[0], 'session-1')
     assert.equal(new Set(received.slice(-3).map((r) => r.auth)).size, 1)
     assert.equal((await f.post({}, { authorization: 'Bearer wrong' })).status, 401)
     assert.equal((await f.post({}, { origin: 'https://evil.example' })).status, 403)

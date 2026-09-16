@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import {
+  summarizeActivity,
   parseUsage,
   heatmapRange,
   heatmapLevel,
@@ -500,4 +501,120 @@ test('热力图默认最近十二个月并支持完整历史，日期边界与�
     history.close()
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('usage costs apply current pricing consistently to totals, daily buckets and model details', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'usage-prices-'))
+  const history = new RequestHistory(join(dir, 'history.sqlite'))
+  try {
+    const start = new Date(2026, 8, 16).getTime()
+    const price = {
+      provider: 'kimi' as const,
+      model: 'm',
+      currency: 'CNY' as const,
+      input: 2,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null
+    }
+    const pricing = {
+      accounts: [],
+      modelPrices: [price],
+      modelPriceCatalog: {
+        entries: [],
+        prices: [{ ...price, currency: 'USD' as const, output: 10, tiered: false }],
+        updatedAt: 1,
+        error: ''
+      }
+    }
+    const record = {
+      id: 'one',
+      provider: 'kimi' as const,
+      accountId: 'a',
+      account: 'a',
+      model: 'm',
+      group: '',
+      time: start + 1000,
+      status: 200,
+      attempts: 1,
+      durationMs: 1,
+      firstTokenMs: null,
+      usage: { input: 1000, output: 100, cacheRead: null, cacheWrite: null, cost: null }
+    }
+    history.append(record)
+    history.append({ ...record, id: 'two', status: 499, usage: { ...record.usage, cost: 0.5 } })
+    const query = { start, end: start + 86400000, bucketMs: 86400000 }
+    const result = history.usage(query, pricing)
+    const expected = [
+      { currency: 'USD', value: 0.501 },
+      { currency: 'CNY', value: 0.002 }
+    ]
+    assert.deepEqual(result.summary.costAmounts, expected)
+    assert.deepEqual(result.byModel[0].costAmounts, expected)
+    assert.deepEqual(result.points[0].costAmounts, expected)
+    assert.equal(result.summary.interruptedCostAmounts?.[0].value, 0.5)
+    pricing.modelPrices[0].input = 4
+    assert.equal(
+      history.usage(query, pricing).summary.costAmounts?.find((p) => p.currency === 'CNY')?.value,
+      0.004
+    )
+    assert.equal(history.page().records[1].usage?.cost, null)
+  } finally {
+    history.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('activity summary counts daily peaks and streaks, and estimates sessions per account', () => {
+  const at = (day: number, hour = 10) => new Date(2026, 8, day, hour).getTime()
+  const rows = [
+    { time: at(12), durationMs: 60000, account: 'a', tokens: 100 },
+    { time: at(13), durationMs: 60000, account: 'a', tokens: 200 },
+    { time: at(14), durationMs: 60000, account: 'a', tokens: 300 },
+    { time: at(14) + 31 * 60000, durationMs: 60000, account: 'a', tokens: 400 },
+    { time: at(14) + 40 * 60000, durationMs: 60000, account: 'b', tokens: 500 },
+    { time: at(16), durationMs: 60000, account: 'a', tokens: 50 }
+  ]
+  assert.deepEqual(summarizeActivity(rows, at(16, 12)), {
+    totalTokens: 1550,
+    peakTokens: 1200,
+    longestChatMs: null,
+    currentStreak: 1,
+    longestStreak: 3
+  })
+  assert.equal(summarizeActivity(rows, at(15, 12)).currentStreak, 3)
+  assert.equal(summarizeActivity(rows, at(18, 12)).currentStreak, 0)
+  assert.deepEqual(summarizeActivity([], at(16)), {
+    totalTokens: 0,
+    peakTokens: 0,
+    longestChatMs: null,
+    currentStreak: 0,
+    longestStreak: 0
+  })
+})
+
+test('session duration spans days and account switches without sticky expiry', () => {
+  const start = new Date(2026, 8, 10, 9).getTime()
+  const result = summarizeActivity(
+    [
+      { time: start, durationMs: 60000, account: 'a', tokens: 1, sessionId: 'session-one' },
+      {
+        time: start + 48 * 3600000,
+        durationMs: 120000,
+        account: 'b',
+        tokens: 2,
+        sessionId: 'session-one'
+      },
+      { time: start - 86400000, durationMs: 60000, account: 'a', tokens: 1 },
+      {
+        time: start + 49 * 3600000,
+        durationMs: 60000,
+        account: 'a',
+        tokens: 1,
+        sessionId: 'session-two'
+      }
+    ],
+    start + 50 * 3600000
+  )
+  assert.equal(result.longestChatMs, 48 * 3600000 + 120000)
 })

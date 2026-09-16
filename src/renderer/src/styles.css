@@ -1365,7 +1365,7 @@ textarea {
 }
 .heatmap-scroll {
   overflow-x: auto;
-  padding: 6px 0 2px;
+  padding: 6px 4px 4px;
 }
 .heatmap-grid {
   display: grid;
@@ -1787,4 +1787,207 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pricing-toolbar {
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.pricing-toolbar p {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+.pricing-toolbar input {
+  width: 230px;
+  max-width: 100%;
+}
+.pricing-table {
+  min-width: 820px;
+}
+.pricing-table td {
+  font-variant-numeric: tabular-nums;
+}
+.pricing-footnote,
+.pricing-notice {
+  margin: 0;
+  padding: 16px 24px;
+  font-size: 12px;
+}
+
+.pricing-source {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 5px;
+  font-weight: normal;
+}
+
+.price-match-picker {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 16px 0;
+}
+.price-match-results {
+  max-height: 280px;
+  overflow-y: auto;
+}
+.price-match-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.price-match-result > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.price-match-result small {
+  display: block;
+  color: var(--muted);
+  margin-top: 5px;
+  font-size: 11px;
+}
+.price-match-result .button {
+  flex-shrink: 0;
+}
+
+.request-cost {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.request-cost > span {
+  display: block;
+}
+
+.request-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.request-cost-amount {
+  display: block;
+}
+.request-cost-help {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: help;
+}
+.request-cost-help:hover,
+.request-cost-help:focus-visible {
+  color: var(--accent);
+}
+.request-cost-tooltip {
+  position: fixed;
+  z-index: 1000;
+  width: 500px;
+  max-width: calc(100vw - 24px);
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 30px #0002;
+  white-space: normal;
+  font-size: 12px;
+}
+.request-cost-tooltip p {
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+.request-cost-tooltip table {
+  width: 100%;
+  margin-top: 12px;
+  min-width: 0;
+}
+.request-cost-tooltip th,
+.request-cost-tooltip td {
+  padding: 8px 6px;
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+.request-cost-tooltip th:first-child {
+  text-align: left;
+}
+.request-cost-total {
+  font-weight: 600;
+}
+
+.activity-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 0;
+  margin-bottom: 24px;
+}
+.activity-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: center;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+}
+.activity-summary > div:last-child {
+  border-right: 0;
+}
+.activity-summary strong {
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.activity-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 720px) {
+  .activity-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px 0;
+  }
+  .activity-summary > div:nth-child(3) {
+    border-right: 0;
+  }
+}
+
+.quota-logo-handle {
+  cursor: grab;
+  -webkit-user-drag: none;
+  touch-action: none;
+  user-select: none;
+  padding: 0;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+.quota-logo-handle:active {
+  cursor: grabbing;
+  transform: scale(0.94);
+}
+.quota-logo-handle * {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.overview-account-card.is-dragging {
+  opacity: 0.3;
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+.quota-drag-ghost {
+  box-shadow: 0 16px 40px #0003;
+  border-color: var(--accent);
+  cursor: grabbing;
+}
+@media (prefers-reduced-motion: reduce) {
+  .quota-logo-handle {
+    transition: none;
+  }
 }
