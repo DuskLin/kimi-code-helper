@@ -1,0 +1,620 @@
+import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import {
+  kimiBaseUrl,
+  type AccountCapabilities,
+  type GatewaySnapshot,
+  type RequestRecord,
+  type Region
+} from '../../shared/contracts'
+import {
+  GatewayStore,
+  capabilityFields,
+  object,
+  string,
+  validateAccount,
+  validateGateway
+} from './gateway-store'
+import { KimiCapabilities } from './kimi-capabilities'
+import { Scheduler } from './scheduler'
+import { FirstTokenObserver } from './first-token'
+import { RequestHistory } from './request-history'
+import { ResponseIdsObserver, validRequestId } from './response-ids'
+import type { TokenUsage, UsageProtocol } from '../../shared/usage'
+import { QUOTA_REFRESH_MS } from '../../shared/kimi-quota'
+
+class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message)
+  }
+}
+const routes = new Set([
+  '/v1/responses',
+  '/v1/chat/completions',
+  '/v1/messages',
+  '/v1/messages/count_tokens',
+  '/v1/models'
+])
+const retryable = (status: number): boolean =>
+  [401, 403, 408, 429].includes(status) || status >= 500
+function matchesKey(value: string, key: string): boolean {
+  const a = Buffer.from(value),
+    b = Buffer.from(key)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+function jsonError(res: ServerResponse, status: number, message: string): void {
+  if (res.destroyed || res.headersSent) return
+  res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+  res.end(
+    JSON.stringify({
+      type: 'error',
+      error: {
+        type:
+          status === 401
+            ? 'authentication_error'
+            : status === 400
+              ? 'invalid_request_error'
+              : 'api_error',
+        message
+      }
+    })
+  )
+}
+async function bodyOf(req: IncomingMessage): Promise<Buffer> {
+  const limit = 8 * 1024 * 1024
+  if (Number(req.headers['content-length']) > limit) throw new HttpError(413, '请求体超过 8 MB')
+  const chunks: Buffer[] = []
+  let bytes = 0
+  // 不销毁读流，使超限时仍能返回结构化错误。
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    bytes += chunk.length
+    if (bytes > limit) throw new HttpError(413, '请求体超过 8 MB')
+    chunks.push(Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks)
+}
+export class Gateway {
+  readonly scheduler = new Scheduler()
+  private readonly capabilities: KimiCapabilities
+  private server?: Server
+  private controllers = new Set<AbortController>()
+  private activeRequests = new Set<Promise<void>>()
+  private transitions: Promise<unknown> = Promise.resolve()
+  private error = ''
+  private requests: RequestRecord[] = []
+  readonly history: RequestHistory
+  private refreshTimer?: ReturnType<typeof setInterval>
+  private refreshWork?: Promise<void>
+  constructor(
+    readonly store: GatewayStore,
+    private readonly request: typeof fetch = fetch,
+    metadataRequest: typeof fetch = request
+  ) {
+    this.capabilities = new KimiCapabilities(metadataRequest)
+    this.history = new RequestHistory(store.historyPath)
+    this.requests = this.history.page().records
+  }
+  snapshot(): GatewaySnapshot {
+    const data = this.store.get()
+    return {
+      activeRequestCount: this.controllers.size,
+      settings: data.settings,
+      groups: data.groups.map(({ key: _key, ...group }) => group),
+      accounts: data.accounts.map(({ credential, ...account }) => ({
+        ...account,
+        hasCredential: !!credential.accessToken,
+        runtime: { ...this.scheduler.state(account.id) }
+      })),
+      running: this.server?.listening ?? false,
+      baseUrl: `http://127.0.0.1:${data.settings.port}`,
+      error: this.error,
+      requests: [...this.requests]
+    }
+  }
+  private exclusive<T>(action: () => Promise<T>): Promise<T> {
+    const pending = this.transitions.then(action)
+    this.transitions = pending.catch(() => {})
+    return pending
+  }
+  setRunning(value: unknown): Promise<GatewaySnapshot> {
+    if (typeof value !== 'boolean') return Promise.reject(new Error('网关开关无效'))
+    return this.exclusive(async () => {
+      if (value) await this.start()
+      else {
+        if (this.controllers.size) throw new Error('网关使用中，请在请求结束后重试')
+        await this.stop()
+      }
+      return this.snapshot()
+    })
+  }
+  shutdown(): Promise<void> {
+    return this.exclusive(() => this.stop())
+  }
+  private async start(): Promise<void> {
+    if (this.server?.listening) return
+    // 首次启动也保存生成的分组密钥，保证下次启动连接配置仍然有效。
+    await this.store.mutate(() => {})
+    const server = createServer((req, res) => {
+      const pending = this.handle(req, res)
+      this.activeRequests.add(pending)
+      void pending.finally(() => this.activeRequests.delete(pending))
+    })
+    server.maxConnections = 256
+    server.headersTimeout = 15000
+    server.requestTimeout = 30000
+    server.on('clientError', (_error, socket) => {
+      if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(this.store.get().settings.port, '127.0.0.1', () => {
+          server.off('error', reject)
+          resolve()
+        })
+      })
+      this.server = server
+      this.error = ''
+      this.refreshTimer = setInterval(() => void this.refreshStaleAccounts(), QUOTA_REFRESH_MS)
+      this.refreshTimer.unref()
+      void this.refreshStaleAccounts()
+      server.on('error', () => {
+        this.error = '本地网关发生监听错误，请停止后重新启动'
+      })
+    } catch (error) {
+      this.error =
+        (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+          ? '端口已被占用，请在网关设置中更换端口'
+          : '本地网关启动失败，请检查端口与系统权限'
+      throw new Error(this.error)
+    }
+  }
+  private async stop(): Promise<void> {
+    clearInterval(this.refreshTimer)
+    this.refreshTimer = undefined
+    const server = this.server
+    if (!server) return
+    for (const controller of this.controllers) controller.abort(new Error('网关已停止'))
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve())
+      server.closeAllConnections()
+    })
+    this.server = undefined
+    await Promise.allSettled([...this.activeRequests])
+    await this.refreshWork
+    this.error = ''
+  }
+  async saveSettings(value: unknown): Promise<GatewaySnapshot> {
+    const settings = validateGateway(value)
+    return this.exclusive(async () => {
+      if (this.server?.listening && settings.port !== this.store.get().settings.port)
+        throw new Error('请先停止网关再更换端口')
+      await this.store.mutate((data) => {
+        data.settings = settings
+      })
+      return this.snapshot()
+    })
+  }
+  async saveAccount(value: unknown): Promise<GatewaySnapshot> {
+    const input = validateAccount(value, this.store.get().groups)
+    const old = this.store.get().accounts.find((a) => a.id === input.id)
+    if (input.id && !old) throw new Error('账号不存在')
+    const key = input.secret || old?.credential.accessToken
+    if (!key) throw new Error('请填写 API Key')
+    const needsRefresh =
+      !old?.capabilities ||
+      old.capabilities.quota === undefined ||
+      old.region !== input.region ||
+      old.credential.accessToken !== key
+    const capabilities = needsRefresh
+      ? await this.capabilities.get(input.region, key)
+      : old.capabilities!
+    const id = await this.store.saveAccount(input, capabilities, key)
+    if (input.secret || !input.id) this.scheduler.reset(id)
+    this.scheduler.prune(this.store.get().accounts)
+    return this.snapshot()
+  }
+  async inspectAccount(value: unknown): Promise<AccountCapabilities> {
+    const input = object(value)
+    if (!['mainland-cn', 'global'].includes(input.region as string)) throw new Error('账号区域无效')
+    const old = input.id
+      ? this.store.get().accounts.find((a) => a.id === string(input.id, '账号 ID'))
+      : undefined
+    if (input.id && !old) throw new Error('账号不存在')
+    const key = input.secret ? string(input.secret, 'API Key', 16384) : old?.credential.accessToken
+    if (!key || /[\s\x00-\x1f\x7f]/.test(key)) throw new Error('请填写有效的 API Key')
+    return this.capabilities.get(input.region as Region, key)
+  }
+  async refreshAccount(value: unknown): Promise<GatewaySnapshot> {
+    const id = string(value, '账号 ID')
+    const old = this.store.get().accounts.find((a) => a.id === id)
+    if (!old?.credential.accessToken) throw new Error('请先填写 API Key')
+    const capabilities = await this.capabilities.get(old.region, old.credential.accessToken, true)
+    await this.store.mutate((data) => {
+      const account = data.accounts.find((a) => a.id === id)
+      if (
+        !account ||
+        account.region !== old.region ||
+        account.credential.accessToken !== old.credential.accessToken
+      )
+        throw new Error('账号已变更，请重新同步')
+      // 用量接口失败时保留上次真实额度及其时间，不能把旧额度标成刚获取。
+      const refreshed =
+        !capabilities.quota && account.capabilities?.quota
+          ? {
+              ...capabilities,
+              quota: account.capabilities.quota,
+              checkedAt: account.capabilities.checkedAt
+            }
+          : capabilities
+      Object.assign(
+        account,
+        capabilityFields(account.region, refreshed, account.concurrencyOverride)
+      )
+    })
+    return this.snapshot()
+  }
+  refreshStaleAccounts(): Promise<void> {
+    if (!this.refreshWork) {
+      this.refreshWork = this.refreshBatch().finally(() => {
+        this.refreshWork = undefined
+      })
+    }
+    return this.refreshWork
+  }
+  private async refreshBatch(): Promise<void> {
+    for (const account of this.store.get().accounts) {
+      if (
+        !account.enabled ||
+        !account.credential.accessToken ||
+        (account.capabilities &&
+          account.capabilities.quota !== undefined &&
+          Date.now() - account.capabilities.checkedAt < QUOTA_REFRESH_MS)
+      )
+        continue
+      try {
+        await this.refreshAccount(account.id)
+      } catch (error) {
+        this.scheduler.state(account.id).lastError =
+          error instanceof Error ? error.message : '上游信息同步失败'
+      }
+    }
+  }
+  connection(value: unknown): string {
+    const input = object(value)
+    const id = string(input.groupId, '分组 ID')
+    const data = this.store.get()
+    const group = data.groups.find((g) => g.id === id)
+    if (!group) throw new Error('分组不存在')
+    const url = `http://127.0.0.1:${data.settings.port}`
+    switch (input.format) {
+      case 'url':
+        return `${url}/v1`
+      case 'key':
+        return group.key
+      case 'kimi':
+        return `default_model = "kimi-helper"\n\n[providers.kimi-helper]\ntype = "kimi"\nbase_url = "${url}/v1"\napi_key = "${group.key}"\n\n[models.kimi-helper]\nprovider = "kimi-helper"\nmodel = "kimi-for-coding"\nmax_context_size = 262144\n`
+      case 'anthropic':
+        return `export ANTHROPIC_BASE_URL='${url}'\nexport ANTHROPIC_AUTH_TOKEN='${group.key}'\nexport ANTHROPIC_MODEL='kimi-for-coding'`
+      default:
+        throw new Error('连接格式无效')
+    }
+  }
+  private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const started = Date.now()
+    const startedTick = performance.now()
+    let firstTokenMs: number | null = null
+    let upstreamRequestId: string | null = null
+    let reasoningEffort: string | null = null
+    let usage: TokenUsage | null = null
+    let streamStartedAt: number | null = null
+    let streamDurationMs: number | null = null
+    let protocol: UsageProtocol | undefined
+    let accountId: string | undefined
+    const controller = new AbortController()
+    const settings = this.store.get().settings
+    let disconnected = false
+    let timedOut = false
+    let upstreamStreamFailed = false
+    let interruption: RequestRecord['interruption'] = null
+    let attempts = 0
+    let groupName = '',
+      accountName = '',
+      model = ''
+    let finalStatus = 500
+    const disconnect = (): void => {
+      if (!res.writableFinished && !controller.signal.aborted && !upstreamStreamFailed) {
+        disconnected = true
+        interruption = 'client_disconnect'
+        controller.abort(new Error('客户端断开'))
+      }
+    }
+    req.once('aborted', disconnect)
+    res.once('close', disconnect)
+    const timer = setTimeout(() => {
+      if (res.writableFinished) return
+      timedOut = true
+      interruption ??= 'timeout'
+      controller.abort(new Error('请求超时'))
+      if (!req.complete) req.destroy()
+    }, settings.timeoutSeconds * 1000)
+    this.controllers.add(controller)
+    try {
+      if (req.headers.origin) throw new HttpError(403, '本地网关不接受网页跨域请求')
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+      const match = url.pathname.match(/^\/groups\/([^/]+)(\/v1\/.*)$/)
+      const route = match ? match[2] : url.pathname
+      if (!routes.has(route)) throw new HttpError(404, '接口不存在')
+      const isModels = route === '/v1/models'
+      protocol =
+        route === '/v1/responses'
+          ? 'responses'
+          : route === '/v1/chat/completions'
+            ? 'chat-completions'
+            : route === '/v1/messages'
+              ? 'messages'
+              : undefined
+      if (req.method !== (isModels ? 'GET' : 'POST')) throw new HttpError(405, '请求方法不支持')
+      const auth = req.headers.authorization
+      const key = auth?.startsWith('Bearer ')
+        ? auth.slice(7)
+        : typeof req.headers['x-api-key'] === 'string'
+          ? req.headers['x-api-key']
+          : ''
+      const data = this.store.get()
+      const group = data.groups.find((g) => matchesKey(key, g.key) && (!match || g.id === match[1]))
+      if (!group) throw new HttpError(401, '分组密钥无效或与接入地址不匹配')
+      groupName = '统一账号池'
+      if (!group.enabled) throw new HttpError(403, '该分组已停用')
+      const body = isModels ? undefined : await bodyOf(req)
+      let session =
+        typeof req.headers['x-session-id'] === 'string' ? req.headers['x-session-id'] : ''
+      if (body) {
+        let payload: Record<string, unknown>
+        try {
+          payload = object(JSON.parse(body.toString('utf8')))
+          model = string(payload.model, '模型', 200)
+        } catch {
+          throw new HttpError(400, '请求须为 JSON 对象，并包含有效的 model')
+        }
+        // 只记录明确的强度枚举；不改写请求，也不保存任意客户端文本。
+        const effort =
+          route === '/v1/responses'
+            ? (payload.reasoning as { effort?: unknown } | null)?.effort
+            : route === '/v1/chat/completions'
+              ? payload.reasoning_effort
+              : (payload.output_config as { effort?: unknown } | null)?.effort
+        if (
+          typeof effort === 'string' &&
+          ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'auto', 'ultra'].includes(
+            effort
+          )
+        )
+          reasoningEffort = effort
+        if (!session && typeof payload.prompt_cache_key === 'string')
+          session = payload.prompt_cache_key
+      }
+      if (session.length > 512) throw new HttpError(400, '会话标识超过 512 个字符')
+      const excluded = new Set<string>()
+      while (attempts < settings.maxAttempts && !controller.signal.aborted) {
+        // 每次尝试读取最新配置，禁用、删除和分组变更立即影响后续调度。
+        const latest = this.store.get()
+        // 旧分组地址和密钥仅作为兼容入口；所有入口调度同一个账号池。
+        const liveGroup = {
+          ...group,
+          id: 'default',
+          enabled: true,
+          stickySeconds: latest.settings.stickySeconds ?? 300
+        }
+        const pool = latest.accounts.map((account) => ({
+          ...account,
+          memberships: [{ groupId: 'default', priority: 0, weight: 1 }]
+        }))
+        const lease = this.scheduler.acquire(pool, liveGroup, model, session, excluded)
+        if (!lease) break
+        const { account } = lease
+        excluded.add(account.id)
+        accountName = account.name
+        accountId = account.id
+        attempts++
+        const attemptStarted = Date.now()
+        const attemptStartedTick = performance.now()
+        try {
+          const token = account.credential.accessToken
+          if (controller.signal.aborted) break
+          const headers = new Headers({
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+            'accept-encoding': 'identity'
+          })
+          for (const name of ['accept', 'user-agent', 'anthropic-version', 'anthropic-beta']) {
+            const value = req.headers[name]
+            if (typeof value === 'string') headers.set(name, value)
+          }
+          if (route.startsWith('/v1/messages') && !headers.has('anthropic-version'))
+            headers.set('anthropic-version', '2023-06-01')
+          const upstream = await this.request(
+            `${kimiBaseUrl(account.region)}${route.slice(3)}${url.search}`,
+            {
+              method: req.method,
+              headers,
+              body: body ? new Uint8Array(body) : undefined,
+              signal: controller.signal,
+              redirect: 'manual'
+            }
+          )
+          upstreamRequestId = null
+          for (const name of [
+            'x-msh-request-id',
+            'x-request-id',
+            'request-id',
+            'requestid',
+            'x-kimi-request-id'
+          ]) {
+            const value = upstream.headers.get(name)
+            if (validRequestId(value)) {
+              upstreamRequestId = value
+              console.info(`[gateway] upstream ${name}=${value}`)
+              break
+            }
+          }
+          if (retryable(upstream.status)) {
+            this.scheduler.failure(
+              account.id,
+              upstream.status,
+              settings.cooldownSeconds,
+              upstream.headers.get('retry-after')
+            )
+            await upstream.body?.cancel()
+            continue
+          }
+          if (upstream.status >= 300 && upstream.status < 400) {
+            await upstream.body?.cancel()
+            this.scheduler.failure(account.id, 502, settings.cooldownSeconds)
+            continue
+          }
+          finalStatus = upstream.status
+          const outgoing: Record<string, string> = {
+            'cache-control': 'no-store',
+            'x-accel-buffering': 'no'
+          }
+          for (const name of [
+            'content-type',
+            'request-id',
+            'x-request-id',
+            'x-msh-request-id',
+            'requestid',
+            'x-kimi-request-id',
+            'x-trace-id',
+            'retry-after'
+          ]) {
+            const value = upstream.headers.get(name)
+            if (value) outgoing[name] = value
+          }
+          res.writeHead(upstream.status, outgoing)
+          res.flushHeaders()
+          // 原样转发 SSE、工具调用和普通响应；开始输出后不再重试，避免重复生成。
+          if (upstream.body) {
+            const source = Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0])
+            // pipeline 会销毁下游；先标记上游故障，避免将它误判为用户主动取消。
+            source.once('error', () => {
+              if (!controller.signal.aborted) {
+                upstreamStreamFailed = true
+                interruption ??= 'upstream_disconnect'
+              }
+            })
+            const streaming = !!upstream.headers.get('content-type')?.includes('text/event-stream')
+            let streamComplete = false
+            let streamInspectable = true
+            if (upstream.ok && streaming) streamStartedAt = attemptStartedTick
+            const ids = new ResponseIdsObserver(
+              streaming,
+              (id) => {
+                if (!upstreamRequestId) {
+                  upstreamRequestId = id
+                  console.info(`[gateway] upstream requestId=${id}`)
+                }
+              },
+              protocol,
+              (reported) => {
+                usage = {
+                  input: null,
+                  output: null,
+                  cacheRead: null,
+                  cacheWrite: null,
+                  cost: null,
+                  ...usage,
+                  ...reported
+                }
+              },
+              (state) => {
+                if (!upstream.ok) return
+                if (state === 'complete') streamComplete = true
+                else if (state === 'unknown') streamInspectable = false
+                else interruption ??= 'upstream_error'
+              }
+            )
+            if (upstream.ok && streaming) {
+              const observer = new FirstTokenObserver(() => {
+                firstTokenMs ??= Math.round(performance.now() - startedTick)
+              })
+              await pipeline(source, ids, observer, res, { signal: controller.signal })
+            } else await pipeline(source, ids, res, { signal: controller.signal })
+            if (upstream.ok && streaming && streamInspectable && !streamComplete)
+              interruption ??= 'upstream_disconnect'
+          } else res.end()
+          if (interruption) {
+            finalStatus = 502
+            this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
+          } else if (upstream.ok) this.scheduler.success(account.id, Date.now() - attemptStarted)
+          else this.scheduler.failure(account.id, upstream.status, settings.cooldownSeconds)
+          return
+        } catch {
+          if (!disconnected && (!controller.signal.aborted || timedOut))
+            this.scheduler.failure(account.id, 0, settings.cooldownSeconds)
+          if (res.headersSent) {
+            finalStatus = timedOut ? 504 : 502
+            res.destroy()
+            return
+          }
+        } finally {
+          if (streamStartedAt !== null) {
+            streamDurationMs = Math.max(0, Math.round(performance.now() - streamStartedAt))
+            streamStartedAt = null
+          }
+          lease.release()
+        }
+      }
+      if (controller.signal.aborted)
+        throw new HttpError(timedOut ? 504 : 503, timedOut ? '上游请求超时' : '网关已停止')
+      res.setHeader('retry-after', String(settings.cooldownSeconds))
+      throw new HttpError(503, '无可用账号：请检查凭据、模型、并发上限、额度或冷却状态')
+    } catch (error) {
+      finalStatus = timedOut ? 504 : error instanceof HttpError ? error.status : 500
+      jsonError(
+        res,
+        finalStatus,
+        timedOut ? '上游请求超时' : error instanceof HttpError ? error.message : '本地网关处理失败'
+      )
+    } finally {
+      if (controller.signal.aborted && !interruption) interruption = 'gateway_shutdown'
+      clearTimeout(timer)
+      this.controllers.delete(controller)
+      req.off('aborted', disconnect)
+      res.off('close', disconnect)
+      if (!req.complete) req.resume()
+      {
+        const record: RequestRecord = {
+          id: randomUUID(),
+          time: started,
+          group: groupName,
+          account: accountName,
+          accountId,
+          protocol,
+          usage,
+          interruption,
+          streamDurationMs,
+          model,
+          status: disconnected ? 499 : finalStatus,
+          attempts,
+          firstTokenMs,
+          upstreamRequestId,
+          reasoningEffort,
+          durationMs: Date.now() - started
+        }
+        try {
+          this.history.append(record)
+        } catch {
+          this.error = '请求记录保存失败，请检查磁盘空间与文件权限'
+        }
+        this.requests.unshift(record)
+        this.requests = this.requests.slice(0, 10)
+      }
+    }
+  }
+}

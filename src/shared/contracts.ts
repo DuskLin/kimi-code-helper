@@ -11,13 +11,166 @@ export interface AppInfo {
 }
 
 export interface HelperApi {
+  getUsageStats(query: import('./usage').UsageQuery): Promise<import('./usage').UsageStats>
   getAppInfo(): Promise<AppInfo>
   getSettings(): Promise<AppSettings>
   saveSettings(settings: AppSettings): Promise<AppSettings>
+  getGateway(): Promise<GatewaySnapshot>
+  getRequestHistory(before?: number): Promise<RequestHistoryPage>
+  saveAccount(input: AccountInput): Promise<GatewaySnapshot>
+  inspectAccount(input: AccountProbe): Promise<AccountCapabilities>
+  refreshAccount(id: string): Promise<GatewaySnapshot>
+  deleteAccount(id: string): Promise<GatewaySnapshot>
+  resetAccount(id: string): Promise<GatewaySnapshot>
+  saveGateway(input: GatewaySettings): Promise<GatewaySnapshot>
+  setGatewayRunning(running: boolean): Promise<GatewaySnapshot>
+  copyConnection(input: {
+    groupId: string
+    format: 'url' | 'key' | 'kimi' | 'anthropic'
+  }): Promise<void>
+}
+
+export type Region = 'mainland-cn' | 'global'
+export const DEFAULT_ACCOUNT_CONCURRENCY = 20
+export type Strategy = 'balanced'
+export interface Membership {
+  groupId: string
+  /** 仅保留以兼容旧配置，不再参与调度。 */
+  priority: number
+  /** 仅保留以兼容旧配置，不再参与调度。 */
+  weight: number
+}
+export interface AccountInput {
+  id?: string
+  name: string
+  kind: 'api-key'
+  region: Region
+  enabled: boolean
+  concurrencyOverride?: number | null
+  memberships: Membership[]
+  secret?: string
+}
+export interface AccountView extends Omit<AccountInput, 'secret' | 'id'> {
+  id: string
+  baseUrl: string
+  maxConcurrency: number
+  models: string[]
+  capabilities: AccountCapabilities | null
+  hasCredential: boolean
+  runtime: AccountRuntime
+}
+export interface AccountProbe {
+  id?: string
+  region: Region
+  secret?: string
+}
+export interface AccountCapabilities {
+  models: string[]
+  maxConcurrency: number | null
+  checkedAt: number
+  warning: string
+  quota?: AccountQuota | null
+}
+export interface QuotaWindow {
+  limit: number | null
+  used: number | null
+  remaining: number | null
+  resetAt: string | null
+}
+export interface AccountQuota {
+  fiveHour: QuotaWindow | null
+  weekly: QuotaWindow | null
+  total: QuotaWindow | null
+  totalUnlimited: boolean
+}
+export function kimiBaseUrl(region: Region): string {
+  return region === 'global' ? 'https://api.kimi.ai/coding/v1' : 'https://api.kimi.com/coding/v1'
+}
+export interface AccountRuntime {
+  active: number
+  requests: number
+  successes: number
+  failures: number
+  cooldownUntil: number
+  authFailed: boolean
+  lastError: string
+  lastUsed: number
+  latencyMs: number
+}
+export interface GroupInput {
+  id?: string
+  name: string
+  enabled: boolean
+  strategy: Strategy
+  stickySeconds: number
+}
+export interface GroupView extends GroupInput {
+  id: string
+}
+export interface GatewaySettings {
+  stickySeconds?: number
+  port: number
+  autoStart: boolean
+  timeoutSeconds: number
+  maxAttempts: number
+  cooldownSeconds: number
+}
+export interface RequestRecord {
+  interruption?:
+    | 'client_disconnect'
+    | 'timeout'
+    | 'upstream_disconnect'
+    | 'upstream_error'
+    | 'gateway_shutdown'
+    | null
+  streamDurationMs?: number | null
+  accountId?: string
+  protocol?: import('./usage').UsageProtocol
+  usage?: import('./usage').TokenUsage | null
+  upstreamRequestId?: string | null
+  reasoningEffort?: string | null
+  id: string
+  time: number
+  group: string
+  account: string
+  model: string
+  status: number
+  attempts: number
+  durationMs: number
+  firstTokenMs: number | null
+}
+export interface GatewaySnapshot {
+  activeRequestCount: number
+  settings: GatewaySettings
+  groups: GroupView[]
+  accounts: AccountView[]
+  running: boolean
+  baseUrl: string
+  error: string
+  requests: RequestRecord[]
+}
+
+export interface RequestHistoryPage {
+  records: RequestRecord[]
+  nextCursor: number | null
+  total: number
 }
 
 export const IPC = {
   appInfo: 'app:info',
   settingsGet: 'settings:get',
-  settingsSave: 'settings:save'
+  settingsSave: 'settings:save',
+  gatewayGet: 'gateway:get',
+  requestHistory: 'gateway:request-history',
+  usageStats: 'gateway:usage-stats',
+  accountSave: 'account:save',
+  accountInspect: 'account:inspect',
+  accountRefresh: 'account:refresh',
+  accountDelete: 'account:delete',
+  accountReset: 'account:reset',
+  groupSave: 'group:save',
+  groupDelete: 'group:delete',
+  gatewaySave: 'gateway:save',
+  gatewayRunning: 'gateway:running',
+  connectionCopy: 'connection:copy'
 } as const

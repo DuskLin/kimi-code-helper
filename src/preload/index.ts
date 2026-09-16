@@ -5,6 +5,17 @@ import { IPC, type HelperApi } from '../shared/contracts'
 const api: HelperApi = {
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
-  saveSettings: (settings) => ipcRenderer.invoke(IPC.settingsSave, settings)
+  saveSettings: (settings) => ipcRenderer.invoke(IPC.settingsSave, settings),
+  getGateway: () => ipcRenderer.invoke(IPC.gatewayGet),
+  getRequestHistory: (before) => ipcRenderer.invoke(IPC.requestHistory, before),
+  getUsageStats: (query) => ipcRenderer.invoke(IPC.usageStats, query),
+  saveAccount: (input) => ipcRenderer.invoke(IPC.accountSave, input),
+  inspectAccount: (input) => ipcRenderer.invoke(IPC.accountInspect, input),
+  refreshAccount: (id) => ipcRenderer.invoke(IPC.accountRefresh, id),
+  deleteAccount: (id) => ipcRenderer.invoke(IPC.accountDelete, id),
+  resetAccount: (id) => ipcRenderer.invoke(IPC.accountReset, id),
+  saveGateway: (input) => ipcRenderer.invoke(IPC.gatewaySave, input),
+  setGatewayRunning: (running) => ipcRenderer.invoke(IPC.gatewayRunning, running),
+  copyConnection: (input) => ipcRenderer.invoke(IPC.connectionCopy, input)
 }
 contextBridge.exposeInMainWorld('kimiHelper', api)
