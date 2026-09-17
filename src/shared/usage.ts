@@ -97,7 +97,7 @@ function object(value: unknown): Record<string, unknown> {
 function count(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
 }
-/** 与 cc-switch 一致：OpenAI 的 input 包含缓存，Anthropic 的 input 不包含缓存。 */
+/** OpenAI 的 input 包含缓存，Anthropic 的 input 不包含缓存。 */
 export function parseUsage(value: unknown, protocol: UsageProtocol): Partial<TokenUsage> | null {
   const root = object(value)
   const u = object(object(root.response).usage ?? object(root.message).usage ?? root.usage)

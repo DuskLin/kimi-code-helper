@@ -227,7 +227,6 @@ CI 会上传安装包、blockmap 和更新清单，并合并 macOS 两种架构�
 ## 更多文档
 
 - [详细技术参考](docs/reference.zh-CN.md)：同步、调度评分、统计口径、配置迁移与存储细节（中文）。
-- [协议转换审计](docs/protocol-conversion-audit.md)：协议映射与测试覆盖（中文）。
 - [截图来源](docs/images/README.md)：配图说明与更新方式。
 
 ## 许可证

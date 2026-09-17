@@ -228,7 +228,6 @@ CI publishes installers, blockmaps and update manifests, merging both Mac archit
 ## Further reading
 
 - [Technical reference](docs/reference.zh-CN.md): synchronization, scheduling scores, metric definitions, configuration migration, and storage details (Chinese).
-- [Protocol conversion audit](docs/protocol-conversion-audit.md): mappings and test coverage (Chinese).
 - [Screenshot sources](docs/images/README.md): image provenance and update instructions.
 
 ## License

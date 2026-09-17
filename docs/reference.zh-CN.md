@@ -8,7 +8,7 @@
 
 OpenCode Go 接入：在「添加账号」中选择「OpenCode Go · 订阅」，填写已订阅 Go 的 API Key。使用固定的 `https://opencode.ai/zen/go/v1`，从 `/models` 获取模型、从 `/usage` 获取 5 小时、周、月三个已用百分比窗口，界面显示剩余百分比。三个窗口中任一个新鲜额度耗尽时暂不调度，查询失败保留旧值和原同步时间。模型目录是公开接口，因此用量接口返回 401/403 时会拒绝保存密钥。
 
-OpenCode Go 支持 Chat Completions、Responses、Anthropic Messages 三种客户端协议互转。网关按模型选原生上游协议：`gpt-*`、`grok-*`、`muse-spark-*` 使用 Responses，`minimax-*`、`qwen*` 使用 Messages，其余模型使用 Chat Completions；客户端无需跟随模型切换接口。转换请求和 JSON/SSE 响应，支持系统指令、图片、函数工具及结果、并行工具调用、Responses custom/namespace 客户端工具、思考强度、输出上限和缓存用量换算。同协议仍原样透传，开始输出后不重试。转换逻辑参考 `sub2api_local/backend/internal/pkg/apicompat`，端点规则参考 [OpenCode Go 官方文档](https://opencode.ai/docs/go/#endpoints)。
+OpenCode Go 支持 Chat Completions、Responses、Anthropic Messages 三种客户端协议互转。网关按模型选原生上游协议：`gpt-*`、`grok-*`、`muse-spark-*` 使用 Responses，`minimax-*`、`qwen*` 使用 Messages，其余模型使用 Chat Completions；客户端无需跟随模型切换接口。转换请求和 JSON/SSE 响应，支持系统指令、图片、函数工具及结果、并行工具调用、Responses custom/namespace 客户端工具、思考强度、输出上限和缓存用量换算。同协议仍原样透传，开始输出后不重试。端点规则参考 [OpenCode Go 官方文档](https://opencode.ai/docs/go/#endpoints)。
 
 跨协议需要完整消息历史，不支持引用另一上游私有的 `previous_response_id`、`conversation`、`item_reference`、`file_id`；上游托管搜索工具、后台任务和 `n>1` 返回明确的 400，不会静默丢弃。OpenCode Go 的 `/v1/messages/count_tokens` 在本地估算，并通过 `x-token-count-estimated: true` 标明，不能当作准确账单用量。跨协议转换限制单个 SSE 事件 1 MB、累计输出内容 16 MB；工具参数不合法、流中断或缺少结束事件不会伪造成功结束。OpenCode Zen 按量付费账号不在当前接入范围。
 
@@ -18,7 +18,7 @@ Go 请求转发 `x-opencode-session`：优先复用客户端会话头、`prompt_
 
 DeepSeek 接入：在「添加账号」中选择「DeepSeek · 按量付费」，填写开放平台 API Key。模型从官方 `/v1/models` 同步，余额从 `/user/balance` 同步，分别展示 CNY、USD 等币种，不相加或换算；明确返回不可用余额的账号暂停调度，刷新恢复可用后自动参与调度。余额查询失败会保留上次余额及同步时间，并提示错误。
 
-DeepSeek 参考 `sub2api_local` 的原生协议路由：Chat Completions、Responses 使用 `https://api.deepseek.com/v1`，Anthropic Messages 使用 `https://api.deepseek.com/anthropic/v1/messages`。网关 `/v1/models` 汇总已启用、已同步账号的模型，客户端须指定对应模型 ID；现有 Kimi 配置示例使用 Kimi 模型，接入 DeepSeek 时需要修改客户端模型。没有硬编码 DeepSeek 模型列表或套餐额度；并发沿用上游明确值、默认 20 和手动覆盖规则。旧配置未指定供应商时按 Kimi 读取，切换供应商须重新填写 API Key。
+DeepSeek 的原生协议路由：Chat Completions、Responses 使用 `https://api.deepseek.com/v1`，Anthropic Messages 使用 `https://api.deepseek.com/anthropic/v1/messages`。网关 `/v1/models` 汇总已启用、已同步账号的模型，客户端须指定对应模型 ID；现有 Kimi 配置示例使用 Kimi 模型，接入 DeepSeek 时需要修改客户端模型。没有硬编码 DeepSeek 模型列表或套餐额度；并发沿用上游明确值、默认 20 和手动覆盖规则。旧配置未指定供应商时按 Kimi 读取，切换供应商须重新填写 API Key。
 
 ## 多账号负载均衡
 
@@ -31,7 +31,7 @@ DeepSeek 参考 `sub2api_local` 的原生协议路由：Chat Completions、Respo
 - **网关**：只监听 `127.0.0.1`，支持 OpenAI Responses、Chat Completions 和 Anthropic Messages，包括 SSE、工具调用、取消和流式背压。已经开始返回响应后不会重试。
 - **安全与状态**：系统安全存储加密、原子写入、脱敏 IPC、SQLite 永久保存请求摘要（每页 10 条）、账号并发与成功率统计、启动时自动运行网关。请求记录的延迟列同时显示首字与总耗时，新增思考强度列，记录客户端显式指定的强度；保留真实 requestId，不再显示或采集 traceId。旧记录未设置的字段显示「—」。
 
-首 token 耗时从网关收到请求开始，包含重试等待，到流式响应的首个文本、思考或工具调用输出为止；参考 sub2api 的可见输出计时口径，跳过心跳、初始化、usage-only 和错误事件。非流式或未收到有效输出显示「—」。观察器只解析首个有效事件前的有限数据，原始响应字节仍直接透传；不会保存响应内容。
+首 token 耗时从网关收到请求开始，包含重试等待，到流式响应的首个文本、思考或工具调用输出为止；仅计入可见输出，跳过心跳、初始化、usage-only 和错误事件。非流式或未收到有效输出显示「—」。观察器只解析首个有效事件前的有限数据，原始响应字节仍直接透传；不会保存响应内容。
 
 所有新旧接入地址共享账号并发槽位和粘性会话池；会话标识按模型隔离。会话保持使用 `X-Session-Id` 请求头或 `prompt_cache_key` 字段，账号满载或故障时允许重新分配。
 
@@ -77,7 +77,7 @@ macOS 关闭窗口后网关继续运行，退出应用才停止；其他平台�
 
 ## 使用统计
 
-首页统计参考本机 `../cc-switch` 的 UsageHero、UsageTrendChart 与 usage_stats 实现：真实 Tokens 为新增输入、输出、缓存创建和缓存命中之和；命中率为缓存命中 / 全部输入。OpenAI 输入中已包含的缓存会先扣除，Anthropic 分开的输入和缓存分别统计。流式累计用量快照合并覆盖，不重复相加。
+首页统计口径：真实 Tokens 为新增输入、输出、缓存创建和缓存命中之和；命中率为缓存命中 / 全部输入。OpenAI 输入中已包含的缓存会先扣除，Anthropic 分开的输入和缓存分别统计。流式累计用量快照合并覆盖，不重复相加。
 
 首页统一展示当天用量；统计卡片内的刷新按钮默认 5 秒自动刷新，点击按 5 → 15 → 30 → 5 秒循环切换。趋势图支持悬停、方向键查看数值和图例开关，按小时或天聚合。用量摘要随请求永久落盘；已有记录未捕获的用量无法补回。请求费用优先采用上游报告的美元费用，否则按当前模型单价估算，手动价格优先于匹配的价格目录。估算时缺失价格与用量按 0 计，调整单价后历史估算随之变化；CNY 与 USD 分别汇总，不进行汇率换算。费用估算与订阅额度估值均不代表实际账单。
 
@@ -181,9 +181,7 @@ git push origin v0.1.0
 
 打包完成后，在 GitHub Releases 检查草稿和附件，填写发布说明并发布。也可以直接在 GitHub 创建新 tag 并发布 Release 来触发打包。CI 沿用现有签名配置，macOS 未做开发者证书签名和公证，Windows 未做代码签名。
 
-## 设计参考
-
-额度与并发查询参考本机 `../test/server.py` 和 `../test/web/index.html`。网关参考本机 `../sub2api_local` 的 `account_group.go`、`openai_account_scheduler.go` 和 Kimi API Key 凭据设计，将分组、调度、并发和冷却职责分离为桌面本地服务；未引入其服务器端数据库、计费或多租户模块。
+## 协议文档
 
 协议依据：[Kimi Code 文档](https://www.kimi.com/code/docs/)、[Kimi CLI provider 配置](https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/providers)。
 

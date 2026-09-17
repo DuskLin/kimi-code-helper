@@ -1,6 +1,6 @@
 import type { AccountQuota, QuotaWindow } from './contracts'
 
-// 与 sub2api_local 的 Go 原生协议表一致。模型 ID 仍由上游目录同步。
+// 按模型系列选择 OpenCode Go 原生协议，模型 ID 由上游目录同步。
 export function openCodeGoRoute(model: string): string {
   if (/^(grok-|gpt-|muse-spark-)/i.test(model)) return '/v1/responses'
   if (/^(minimax-|qwen)/i.test(model)) return '/v1/messages'

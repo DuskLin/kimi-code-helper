@@ -48,7 +48,7 @@ function required(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new ProtocolError(`${label}不能为空`)
   return value
 }
-// Same deterministic namespace flattening as sub2api: <=64 bytes, suffix = sha256[:4].
+// Flatten namespace tool names to at most 64 bytes with a deterministic SHA-256 suffix.
 function flattenNamespaceToolName(namespace: string, name: string): string {
   const full = `${namespace}__${name}`
   if (Buffer.byteLength(full) <= 64) return full
@@ -282,7 +282,7 @@ function messagesFrom(body: Wire, protocol: UsageProtocol): Message[] {
   return out
 }
 
-/** Match sub2api's tool-history normalization before sending to strict Chat upstreams. */
+/** Normalize tool history before sending to strict Chat upstreams. */
 function normalizeToolHistory(messages: Message[]): Message[] {
   const merged: Message[] = []
   for (const message of messages) {
@@ -480,7 +480,7 @@ function toolsFrom(body: Wire, protocol: UsageProtocol, context: BridgeContext):
   return out
 }
 
-/** Reference: sub2api_local/internal/pkg/apicompat, direct semantic bridge. */
+/** Convert request semantics between supported client and upstream protocols. */
 export function convertRequest(
   body: Wire,
   source: UsageProtocol,
