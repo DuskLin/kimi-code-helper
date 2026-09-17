@@ -213,9 +213,11 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Choose a new, unpublished version number. Pushing a tag creates a draft Release if needed and uploads assets. Publishing an existing Release preserves its title and notes while updating assets. Release assets are uploaded only after both Mac architecture builds succeed; Actions artifacts are retained for 14 days.
+Choose a new, unpublished version number. Pushing a tag creates a draft Release if needed and uploads assets. Publishing an existing Release preserves its title and handwritten notes while refreshing generated notes and assets. Release assets are uploaded only after both Mac architecture builds succeed; Actions artifacts are retained for 14 days.
 
 Run `npm run test:update:mac` on macOS with compiler tools to verify checksum rejection, staging, replacement, relaunch and backup using an isolated test app. This does not replace your installed application.
+
+Each release receives Chinese notes grouped into new features, fixes, and other improvements. Reruns refresh the generated section while preserving handwritten content. See [release note conventions](release-notes/README.md) for Chinese commit descriptions, `Release-Note-zh` trailers, and reviewed version summaries.
 
 ### In-app updates
 
@@ -227,6 +229,7 @@ CI publishes installers, blockmaps and update manifests, merging both Mac archit
 
 ## Further reading
 
+- [Protocol conversion implementation](docs/protocol-conversion.zh-CN.md): request mapping, tool history, streaming state machine, usage, and error handling (Chinese).
 - [Technical reference](docs/reference.zh-CN.md): synchronization, scheduling scores, metric definitions, configuration migration, and storage details (Chinese).
 - [Screenshot sources](docs/images/README.md): image provenance and update instructions.
 

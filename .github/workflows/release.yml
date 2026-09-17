@@ -90,7 +90,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
+          # Manual rebuilds use current release tooling; application builds still use the tag.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -109,12 +111,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            OPTIONS=(--draft --verify-tag --title "$RELEASE_TAG" --generate-notes)
+          if gh release view "$RELEASE_TAG" --json body --jq .body > existing-notes.md; then
+            RELEASE_EXISTS=true
+          else
+            RELEASE_EXISTS=false
+            : > existing-notes.md
+          fi
+          node scripts/release-notes.mjs --tag "$RELEASE_TAG" --repo "$GH_REPO" --existing existing-notes.md --output release-notes.md
+          if [[ "$RELEASE_EXISTS" == false ]]; then
+            OPTIONS=(--draft --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md)
             if [[ "$RELEASE_TAG" == *-* ]]; then
               OPTIONS+=(--prerelease)
             fi
             gh release create "$RELEASE_TAG" "${OPTIONS[@]}"
+          else
+            gh release edit "$RELEASE_TAG" --notes-file release-notes.md
           fi
           # Upload update metadata last, so clients never discover missing installer assets.
           shopt -s nullglob

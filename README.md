@@ -176,19 +176,19 @@ curl http://127.0.0.1:17300/v1/chat/completions \
 
 技术栈：**Electron · React · TypeScript · electron-vite**。
 
-| 命令                   | 用途                                      |
-| ---------------------- | ----------------------------------------- |
-| `npm run dev`          | 开发模式，监听主进程、预加载和界面变更    |
-| `npm run typecheck`    | TypeScript 检查                           |
-| `npm run build`        | 检查类型并构建到 `out/`                   |
-| `npm start`            | 运行已构建的应用                          |
-| `npm run test:unit`    | 网关、协议转换、调度、用量等单元测试      |
-| `npm run test:smoke`   | 构建并运行真实 Electron 冒烟测试          |
+| 命令                      | 用途                                                     |
+| ------------------------- | -------------------------------------------------------- |
+| `npm run dev`             | 开发模式，监听主进程、预加载和界面变更                   |
+| `npm run typecheck`       | TypeScript 检查                                          |
+| `npm run build`           | 检查类型并构建到 `out/`                                  |
+| `npm start`               | 运行已构建的应用                                         |
+| `npm run test:unit`       | 网关、协议转换、调度、用量等单元测试                     |
+| `npm run test:smoke`      | 构建并运行真实 Electron 冒烟测试                         |
 | `npm run test:update:mac` | macOS 隔离应用：下载校验、替换、重启与备份（需编译工具） |
-| `npm test`             | 单元测试和冒烟测试                        |
-| `npm run pack`         | 生成当前平台应用目录                      |
-| `npm run dist`         | 生成当前平台安装包到 `dist/`              |
-| `npm run format:check` | 检查格式（`npm run format` 可自动格式化） |
+| `npm test`                | 单元测试和冒烟测试                                       |
+| `npm run pack`            | 生成当前平台应用目录                                     |
+| `npm run dist`            | 生成当前平台安装包到 `dist/`                             |
+| `npm run format:check`    | 检查格式（`npm run format` 可自动格式化）                |
 
 冒烟测试需要图形环境和系统安全存储，使用临时配置与本地模拟上游，不消耗真实账号额度，截图输出到 `artifacts/`。它不代表真实供应商端到端验证。开发模式重启会中断请求；需要稳定运行时先构建，再使用 `npm start`。
 
@@ -214,7 +214,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题与说明并更新附件。两种 Mac 架构均构建成功后才上传 Release 附件，Actions 产物保留 14 天。
+请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题和手写说明，更新自动摘要及附件。两种 Mac 架构均构建成功后才上传 Release 附件，Actions 产物保留 14 天。
+
+每次发布会自动生成中文的“新增功能 / 问题修复 / 其他改进”摘要，重跑时更新自动摘要并保留手写说明。支持中文提交说明、`Release-Note-zh` 提交正文及版本级说明文件，详见 [中文发布说明](release-notes/README.md)。
 
 ### App 内升级
 
@@ -226,6 +228,7 @@ CI 会上传安装包、blockmap 和更新清单，并合并 macOS 两种架构�
 
 ## 更多文档
 
+- [协议转换实现](docs/protocol-conversion.zh-CN.md)：请求映射、工具历史、流式状态机、用量与错误处理。
 - [详细技术参考](docs/reference.zh-CN.md)：同步、调度评分、统计口径、配置迁移与存储细节（中文）。
 - [截图来源](docs/images/README.md)：配图说明与更新方式。
 
