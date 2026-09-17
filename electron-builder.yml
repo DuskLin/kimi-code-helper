@@ -1,5 +1,6 @@
 appId: dev.kimicode.helper
 productName: Kimi Code Helper
+icon: src/renderer/src/assets/kimi-code-helper-logo.png
 artifactName: '${name}-${version}-${os}-${arch}.${ext}'
 directories:
   output: dist
