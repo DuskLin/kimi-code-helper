@@ -168,7 +168,7 @@ GitHub Actions 工作流 `.github/workflows/release.yml` 支持两种触发方�
 - 推送 `v` 开头的版本 tag（例如 `v0.1.0`、`v0.2.0-beta.1`）：自动打包，创建 Release 草稿并上传安装包；已有 Release 时更新附件。
 - 在 GitHub 发布 Release（含预发布）：按该 Release 的 tag 自动打包并上传安装包，保留已有标题和发布说明。
 
-每次构建运行单元测试和 TypeScript 检查，生成 macOS x64 / arm64 的 DMG、ZIP，以及 Windows x64 的 EXE 和 Linux x64 的 AppImage。全部平台成功后才上传 Release 附件，安装包也在 Actions Artifacts 中保留 14 天。失败可在 Actions 页面重新运行；相同 tag 的运行串行执行，重跑会替换同名附件。
+每次构建运行单元测试和 TypeScript 检查，仅生成 macOS x64 / arm64 的 DMG、ZIP。两种架构成功后才上传 Release 附件，安装包也在 Actions Artifacts 中保留 14 天。失败可在 Actions 页面重新运行，或手动运行工作流并指定已有 tag；相同 tag 的运行串行执行，重跑会替换同名附件。
 
 安装包版本自动取自 tag（去掉可选的 `v` 前缀，支持 `1.2.3` 或 `1.2.3-beta.1`），仅修改 CI 工作目录，不提交版本变更。附件名称包含版本、系统与架构，避免不同平台互相覆盖。CI 使用仓库自带的 `GITHUB_TOKEN`，无需配置发布密钥；仓库或组织需允许工作流使用 `contents: write` 权限。
 

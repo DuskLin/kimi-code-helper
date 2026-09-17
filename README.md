@@ -207,14 +207,14 @@ docs/                   # 技术参考、协议审计与 README 配图
 
 ## 打包与发布
 
-通常在对应操作系统上运行 `npm run dist`。仓库的 [发布工作流](.github/workflows/release.yml) 会在推送 `v` 开头的版本 tag 或发布 GitHub Release 时触发，构建 macOS x64 / arm64、Windows x64 和 Linux x64 安装包。
+通常在对应操作系统上运行 `npm run dist`。仓库的 [发布工作流](.github/workflows/release.yml) 会在推送 `v` 开头的版本 tag 或发布 GitHub Release 时触发，仅构建 macOS x64（Intel）与 arm64（Apple Silicon）的 DMG / ZIP 安装包。也可在 Actions 页面手动运行工作流，填写已有 tag 来重新打包，无需移动标签。
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题与说明并更新附件。全部平台构建成功后才上传 Release 附件，Actions 产物保留 14 天。
+请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题与说明并更新附件。两种 Mac 架构均构建成功后才上传 Release 附件，Actions 产物保留 14 天。
 
 ### App 内升级
 

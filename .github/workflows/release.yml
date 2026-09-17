@@ -6,16 +6,22 @@ on:
       - 'v[0-9]*'
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  group: release-${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
 
 jobs:
   build:
@@ -32,12 +38,6 @@ jobs:
           - os: macos-15
             platform: mac
             arch: arm64
-          - os: windows-2022
-            platform: win
-            arch: x64
-          - os: ubuntu-22.04
-            platform: linux
-            arch: x64
     defaults:
       run:
         shell: bash
@@ -62,7 +62,6 @@ jobs:
           npm version "$VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
       - run: npm run test:unit
       - name: Test macOS update installation
-        if: runner.os == 'macOS'
         run: npm run test:update:mac
       - name: Build installers
         run: npm run dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
@@ -77,8 +76,6 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.zip
-            dist/*.exe
-            dist/*.AppImage
             dist/*.blockmap
             dist/*.yml
             !dist/builder*.yml
@@ -102,7 +99,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - uses: actions/download-artifact@v4
         with:
-          pattern: installers-*
+          pattern: installers-mac-*
           path: build-artifacts
       - name: Merge and verify update manifests
         run: node scripts/prepare-release.mjs build-artifacts installers
@@ -121,6 +118,6 @@ jobs:
           fi
           # Upload update metadata last, so clients never discover missing installer assets.
           shopt -s nullglob
-          ASSETS=(installers/*.dmg installers/*.zip installers/*.exe installers/*.AppImage installers/*.blockmap)
+          ASSETS=(installers/*.dmg installers/*.zip installers/*.blockmap)
           gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
           gh release upload "$RELEASE_TAG" installers/*.yml --clobber
