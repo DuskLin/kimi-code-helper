@@ -1,6 +1,6 @@
 {
   "name": "kimi-code-helper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Kimi Code 多账号与性能管理桌面助手",
   "main": "out/main/index.js",
   "author": "Kimi Code Helper contributors",

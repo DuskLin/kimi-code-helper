@@ -650,7 +650,7 @@ export class Gateway {
             headers.set('anthropic-version', '2023-06-01')
           if (account.provider === 'opencode-go') {
             headers.set('x-opencode-session', goSession)
-            if (!headers.has('user-agent')) headers.set('user-agent', 'Kimi-Code-Helper/0.1.0')
+            if (!headers.has('user-agent')) headers.set('user-agent', 'Kimi-Code-Helper/0.2.0')
             if (targetRoute === '/v1/messages') headers.set('x-api-key', token)
             else {
               headers.delete('anthropic-version')
