@@ -130,6 +130,13 @@ const testEntry = join(userData, 'smoke-main.cjs')
 await writeFile(
   testEntry,
   `
+  const { Tray } = require('electron');
+  const setContextMenu = Tray.prototype.setContextMenu;
+  Tray.prototype.setContextMenu = function (menu) {
+    globalThis.smokeTray = this;
+    globalThis.smokeTrayMenu = menu;
+    return setContextMenu.call(this, menu);
+  };
   const realFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const url = new URL(String(input));
@@ -291,13 +298,20 @@ try {
       await page.getByLabel('kimi-for-coding Messages', { exact: true }).isChecked(),
       true
     )
+    await page.getByRole('button', { name: '删除模型 k3', exact: true }).click()
+    assert.equal(await page.getByLabel('k3 Messages', { exact: true }).count(), 0)
+    await page.getByRole('button', { name: '获取上游信息', exact: true }).click()
+    await page.getByRole('button', { name: '获取上游信息', exact: true }).waitFor()
+    assert.equal(await page.getByLabel('k3 Messages', { exact: true }).count(), 0)
+    await page.getByRole('button', { name: '恢复已删除模型（1）', exact: true }).click()
+    assert.equal(await page.getByLabel('k3 Messages', { exact: true }).count(), 1)
     await page.getByText('剩余 80 / 100', { exact: true }).waitFor()
     await page.getByText('剩余 40 / 50', { exact: true }).waitFor()
     await page.getByRole('button', { name: '保存账号', exact: true }).click()
     await page.getByRole('dialog').waitFor({ state: 'hidden' })
     await page.getByText(name, { exact: true }).waitFor()
   }
-  await page.getByRole('tab', { name: 'AI 费用管理', exact: true }).click()
+  await page.getByRole('tab', { name: '费用管理', exact: true }).click()
   const pricesTable = page.getByRole('table', { name: '模型单价', exact: true })
   assert.equal(await pricesTable.locator('tbody tr').count(), 2)
   await page.waitForFunction(
@@ -401,10 +415,10 @@ try {
   const originalClipboard = await application.evaluate(({ clipboard }) => clipboard.readText())
   let groupKey
   try {
-    await page.getByRole('button', { name: '复制密钥', exact: true }).click()
-    await page.getByText('已复制到剪贴板', { exact: true }).waitFor()
+    await page.evaluate(() =>
+      window.kimiHelper.copyConnection({ groupId: 'default', format: 'key' })
+    )
     groupKey = await application.evaluate(({ clipboard }) => clipboard.readText())
-    assert.match(groupKey, /^[a-f0-9]{64}$/)
     await page.getByRole('button', { name: '复制 api.json 链接', exact: true }).click()
     await page.waitForTimeout(100)
     assert.equal(
@@ -428,11 +442,7 @@ try {
       await application.evaluate(({ clipboard }) => clipboard.readText()),
       `http://127.0.0.1:${gatewayPort}/v1`
     )
-    await page.getByRole('button', { name: '复制 Key', exact: true }).click()
-    await page.waitForFunction(
-      () => document.querySelector('[aria-label="复制 Key"] .lucide-check') !== null
-    )
-    assert.equal(await application.evaluate(({ clipboard }) => clipboard.readText()), groupKey)
+    assert.equal(await page.getByRole('button', { name: '复制 Key', exact: true }).count(), 0)
   } finally {
     await application.evaluate(
       ({ clipboard }, text) => clipboard.writeText(text),
@@ -461,6 +471,64 @@ try {
     async () => (await window.kimiHelper.getGateway()).requests.length === 4
   )
   await page.getByRole('button', { name: '返回概览', exact: true }).click()
+  await page.getByRole('button', { name: '调度页', exact: true }).click()
+  await page.locator('.flow-node.model').first().waitFor()
+  await page.locator('.flow-node.agent').nth(3).waitFor()
+  assert.equal(await page.locator('.flow-node.agent').count(), 4)
+  assert.equal(await page.locator('.flow-node.harness').count(), 1)
+  const idleSlider = page.getByRole('slider', { name: '空闲节点保留时间' })
+  await idleSlider.focus()
+  await idleSlider.press('End')
+  await page.waitForFunction(
+    async () => (await window.kimiHelper.getGateway()).settings.flowIdleMinutes === 60
+  )
+  await page.reload()
+  await page.getByRole('slider', { name: '空闲节点保留时间' }).waitFor()
+  assert.equal(await idleSlider.inputValue(), '4')
+  const sliderBounds = await idleSlider.boundingBox()
+  await page.mouse.move(
+    sliderBounds.x + sliderBounds.width - 6,
+    sliderBounds.y + sliderBounds.height / 2
+  )
+  await page.mouse.down()
+  await page.mouse.move(sliderBounds.x + 6, sliderBounds.y + sliderBounds.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForFunction(
+    async () => (await window.kimiHelper.getGateway()).settings.flowIdleMinutes === 5
+  )
+  const flowInitialTheme = await page.locator('html').getAttribute('data-theme')
+  for (const [themeName, themeId, background] of [
+    ['深色模式', 'dark', 'rgb(3, 18, 34)'],
+    ['浅色模式', 'light', 'rgb(246, 250, 255)']
+  ]) {
+    await page.getByRole('button', { name: themeName, exact: true }).click()
+    await page.waitForFunction(
+      ({ themeId, background }) =>
+        document.documentElement.dataset.theme === themeId &&
+        getComputedStyle(document.querySelector('.flow-canvas')).backgroundColor === background,
+      { themeId, background }
+    )
+    await page.screenshot({ path: join(artifacts, `live-flow-${themeId}.png`) })
+  }
+  if (flowInitialTheme === 'dark')
+    await page.getByRole('button', { name: '深色模式', exact: true }).click()
+  await page.screenshot({ path: join(artifacts, 'live-flow.png') })
+  assert.equal(
+    await page.getByRole('button', { name: '调度页', exact: true }).getAttribute('aria-pressed'),
+    'true'
+  )
+  await page.reload()
+  await page.locator('.live-flow-panel').waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: '调度页', exact: true }).getAttribute('aria-pressed'),
+    'true'
+  )
+  await page.getByRole('button', { name: '额度页', exact: true }).click()
+  await page.locator('.overview-quotas').waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: '额度页', exact: true }).getAttribute('aria-pressed'),
+    'true'
+  )
   await page.getByText('4,400', { exact: true }).waitFor()
   const autoRefresh = page.getByRole('button', { name: '切换自动刷新间隔', exact: true })
   for (const label of ['5s', '15s', '30s']) {
@@ -702,12 +770,39 @@ try {
   assert.equal(await page.getByRole('tablist', { name: '网关管理' }).count(), 0)
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   await page.getByText('开发账号 A', { exact: true }).waitFor()
+  // 关闭窗口只隐藏，后台网关仍然处理真实 HTTP 请求。
+  assert.equal(
+    await application.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      window.close()
+      return !window.isDestroyed() && !window.isVisible() && !globalThis.smokeTray.isDestroyed()
+    }),
+    true
+  )
   // 使用重启前复制的密钥验证持久化后的真实转发。
   const restoredResponse = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models`, {
     headers: { authorization: `Bearer ${groupKey}` }
   })
   assert.equal(restoredResponse.status, 200)
   await restoredResponse.text()
+  assert.equal(
+    await application.evaluate(({ BrowserWindow }) => {
+      globalThis.smokeTrayMenu.items.find((item) => item.label === '显示主窗口').click()
+      return BrowserWindow.getAllWindows()[0].isVisible()
+    }),
+    true
+  )
+  for (const event of ['activate', 'second-instance']) {
+    assert.equal(
+      await application.evaluate(({ app, BrowserWindow }, event) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        window.close()
+        app.emit(event)
+        return window.isVisible() && BrowserWindow.getAllWindows().length === 1
+      }, event),
+      true
+    )
+  }
   await page.getByRole('tab', { name: '请求记录' }).click()
   await page.getByRole('columnheader', { name: '费用', exact: true }).waitFor()
   await page
@@ -977,6 +1072,13 @@ try {
   await page.evaluate(async () => {
     await window.kimiHelper.getRequestHistory()
   })
+  await Promise.all([
+    application.waitForEvent('close'),
+    application.evaluate(() => {
+      globalThis.smokeTrayMenu.items.find((item) => item.label === '退出 Kimi Code Helper').click()
+    })
+  ])
+  application = undefined
   console.log(
     '通过：真实 Electron、进程隔离、主题、统一账号管理、系统加密存储、真实 HTTP 负载均衡、重启恢复与自动启动、请求记录及最小窗口布局。'
   )

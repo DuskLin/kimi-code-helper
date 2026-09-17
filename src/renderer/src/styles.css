@@ -1088,6 +1088,9 @@ textarea {
   font-size: 11px;
   text-align: center;
 }
+.model-protocol-list th:last-child {
+  width: 44px;
+}
 .model-protocol-list th:first-child {
   width: 40%;
   text-align: left;
@@ -1343,6 +1346,11 @@ textarea {
   font-size: 14px;
   font-weight: 550;
   font-variant-numeric: tabular-nums;
+}
+.usage-metrics .usage-cost-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 .usage-metrics progress {
   width: 100%;
@@ -2130,6 +2138,70 @@ textarea {
 }
 @media (prefers-reduced-motion: reduce) {
   .quota-logo-handle {
+    transition: none;
+  }
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  -webkit-app-region: no-drag;
+}
+.view-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  width: 120px;
+  height: 38px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--control-background);
+  isolation: isolate;
+  -webkit-app-region: no-drag;
+}
+.view-switch-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 2);
+  border-radius: 8px;
+  background: var(--selected);
+  box-shadow: 0 1px 4px #0000000a;
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease;
+  z-index: -1;
+}
+.view-switch.is-flow .view-switch-thumb {
+  transform: translateX(100%);
+  background: #163b40;
+  box-shadow:
+    inset 0 0 0 1px #63f2d640,
+    0 0 12px #63f2d608;
+}
+.view-switch button {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.view-switch button[aria-pressed='true'] {
+  color: var(--text);
+}
+.view-switch.is-flow button[aria-pressed='true'] {
+  color: #87f6de;
+}
+.view-switch button:focus-visible {
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .view-switch-thumb {
     transition: none;
   }
 }

@@ -1,5 +1,6 @@
 import {
   app,
+  autoUpdater as nativeAutoUpdater,
   BrowserWindow,
   clipboard,
   dialog,
@@ -18,6 +19,7 @@ import { GatewayStore, string } from './services/gateway-store'
 import { Gateway } from './services/gateway'
 import { UpdateService } from './services/updates'
 import { UnsignedMacUpdater } from './services/mac-updater'
+import { createTray } from './tray'
 
 app.setName('Kimi Code Helper')
 // 自动化验证使用临时目录，避免改变用户设置。
@@ -28,13 +30,22 @@ if (!ownsInstance) app.quit()
 let gateway: Gateway | undefined
 let updates: UpdateService | undefined
 let quitting = false
-app.on('second-instance', () => {
+let tray: Electron.Tray | undefined
+function showWindow(): void {
+  if (quitting) return
   const window = BrowserWindow.getAllWindows()[0]
   if (window) {
     if (window.isMinimized()) window.restore()
     window.show()
     window.focus()
+  } else if (tray) {
+    createWindow()
   }
+}
+app.on('second-instance', showWindow)
+// electron-updater closes windows before app.quit() on Windows.
+nativeAutoUpdater.on('before-quit-for-update', () => {
+  quitting = true
 })
 const rendererFile = join(__dirname, '../renderer/index.html')
 const developmentUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
@@ -73,6 +84,11 @@ function createWindow(): void {
     }
   })
   window.once('ready-to-show', () => window.show())
+  window.on('close', (event) => {
+    if (quitting || !tray || tray.isDestroyed()) return
+    event.preventDefault()
+    window.hide()
+  })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event, url) => {
     if (!isTrusted(url)) event.preventDefault()
@@ -201,6 +217,7 @@ void app
     })
     handle(IPC.gatewaySave, (value) => service.saveSettings(value))
     handle(IPC.gatewayRunning, (value) => service.setRunning(value))
+    handle(IPC.connectionRotate, (value) => service.rotateKey(value))
     handle(IPC.connectionCopy, async (value) => {
       // 保存默认分组后再复制，避免尚未落盘的密钥在重启后变化。
       await gatewayStore.mutate(() => {})
@@ -222,12 +239,11 @@ void app
         { role: 'windowMenu' }
       ])
     )
+    tray = createTray(showWindow, (listener) => service.onActiveRequestsChange(listener))
     createWindow()
     updater.start()
     void service.refreshStaleAccounts()
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    })
+    app.on('activate', showWindow)
   })
   .catch((error) => {
     console.error('应用启动失败：', error)
@@ -239,9 +255,10 @@ void app
   })
 
 app.on('before-quit', (event) => {
-  if (!gateway || quitting) return
-  event.preventDefault()
+  if (quitting) return
   quitting = true
+  if (!gateway) return
+  event.preventDefault()
   void gateway.shutdown().finally(() => {
     app.quit()
   })
@@ -249,10 +266,11 @@ app.on('before-quit', (event) => {
 
 // before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
 app.on('quit', () => {
+  tray?.destroy()
   updates?.dispose()
   gateway?.history.close()
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (!tray && process.platform !== 'darwin') app.quit()
 })

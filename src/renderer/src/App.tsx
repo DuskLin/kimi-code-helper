@@ -1,11 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, KeyRound, Link2, Moon, Sun } from 'lucide-react'
+import { Check, Link2, Moon, Sun } from 'lucide-react'
 import type { AppInfo, Theme } from '../../shared/contracts'
-import { GatewayPanel, type GatewayStatus } from './GatewayPanel'
+import { GatewayPanel, type GatewayStatus, type GatewayPage } from './GatewayPanel'
 import appLogo from './assets/kimi-code-helper-logo.png'
 import { UpdateControl } from './UpdateControl'
 
+const viewStorageKey = 'kimi-helper.main-view'
+
 export function App() {
+  const [page, setPage] = useState<GatewayPage>(() => {
+    try {
+      return localStorage.getItem(viewStorageKey) === 'flow' ? 'flow' : 'overview'
+    } catch {
+      return 'overview'
+    }
+  })
+  function changePage(next: GatewayPage) {
+    setPage(next)
+    if (next !== 'management') {
+      try {
+        localStorage.setItem(viewStorageKey, next)
+      } catch {
+        /* The switch still works without storage. */
+      }
+    }
+  }
   const [info, setInfo] = useState<AppInfo>()
   const [theme, setTheme] = useState<Theme>('light')
   const [ready, setReady] = useState(false)
@@ -81,31 +100,58 @@ export function App() {
           <img src={appLogo} alt="" aria-hidden="true" />
           <span>Kimi Code Helper</span>
         </div>
-        <div className="theme-control" role="group" aria-label="展示模式">
-          <button
-            aria-label="浅色模式"
-            aria-pressed={theme === 'light'}
-            title="浅色模式"
-            className={theme === 'light' ? 'selected' : ''}
-            disabled={!ready || saving}
-            onClick={() => {
-              void changeTheme('light')
-            }}
+        <div className="titlebar-controls">
+          <div
+            className={`view-switch ${page === 'flow' ? 'is-flow' : ''}`}
+            role="group"
+            aria-label="页面切换"
           >
-            <Sun size={15} />
-          </button>
-          <button
-            aria-label="深色模式"
-            aria-pressed={theme === 'dark'}
-            title="深色模式"
-            className={theme === 'dark' ? 'selected' : ''}
-            disabled={!ready || saving}
-            onClick={() => {
-              void changeTheme('dark')
-            }}
-          >
-            <Moon size={15} />
-          </button>
+            <span className="view-switch-thumb" aria-hidden="true" />
+            <button
+              type="button"
+              aria-label="额度页"
+              aria-pressed={page !== 'flow'}
+              disabled={!ready}
+              onClick={() => changePage('overview')}
+            >
+              额度
+            </button>
+            <button
+              type="button"
+              aria-label="调度页"
+              aria-pressed={page === 'flow'}
+              disabled={!ready}
+              onClick={() => changePage('flow')}
+            >
+              调度
+            </button>
+          </div>
+          <div className="theme-control" role="group" aria-label="展示模式">
+            <button
+              aria-label="浅色模式"
+              aria-pressed={theme === 'light'}
+              title="浅色模式"
+              className={theme === 'light' ? 'selected' : ''}
+              disabled={!ready || saving}
+              onClick={() => {
+                void changeTheme('light')
+              }}
+            >
+              <Sun size={15} />
+            </button>
+            <button
+              aria-label="深色模式"
+              aria-pressed={theme === 'dark'}
+              title="深色模式"
+              className={theme === 'dark' ? 'selected' : ''}
+              disabled={!ready || saving}
+              onClick={() => {
+                void changeTheme('dark')
+              }}
+            >
+              <Moon size={15} />
+            </button>
+          </div>
         </div>
       </header>
       {error && (
@@ -115,7 +161,9 @@ export function App() {
         </div>
       )}
       <main className="workspace" aria-label="工作空间">
-        {ready && <GatewayPanel onStatusChange={setGatewayStatus} />}
+        {ready && (
+          <GatewayPanel onStatusChange={setGatewayStatus} page={page} setPage={changePage} />
+        )}
       </main>
       <footer className="statusbar">
         <div className="statusbar-connection">
@@ -139,14 +187,6 @@ export function App() {
                 onClick={() => void copyConnection('url')}
               >
                 {copied === 'url' ? <Check size={12} /> : <Link2 size={12} />}
-              </button>
-              <button
-                className="statusbar-copy"
-                aria-label="复制 Key"
-                title="复制网关 Key"
-                onClick={() => void copyConnection('key')}
-              >
-                {copied === 'key' ? <Check size={12} /> : <KeyRound size={12} />}
               </button>
             </div>
           )}

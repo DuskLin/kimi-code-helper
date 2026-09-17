@@ -13,7 +13,7 @@
     "build": "npm run typecheck && electron-vite build",
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "tsc -p tsconfig.test.json && node --test artifacts/tests/tests/*.test.js",
-    "test:smoke": "npm run build && node scripts/smoke.mjs",
+    "test:smoke": "npm run build && node scripts/smoke.mjs && node scripts/tray-smoke.mjs",
     "test:update:mac": "tsc -p tsconfig.test.json && node scripts/test-mac-update.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

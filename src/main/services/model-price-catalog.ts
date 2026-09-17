@@ -7,6 +7,7 @@ import type {
   Provider
 } from '../../shared/contracts'
 import { PRICE_FIELDS } from '../../shared/model-pricing'
+import { parseRegistryCapabilities } from './registry-capabilities'
 import { object, validateModelPrice } from './gateway-store'
 
 export const MODEL_PRICE_API = 'https://models.dev/api.json'
@@ -63,11 +64,13 @@ export function parseCatalogEntries(value: unknown): CatalogPrice[] {
           ? object(node.cost)
           : {}
       const limit = modelLimit(node.limit)
+      const capabilities = parseRegistryCapabilities(node)
       const price: CatalogPrice = {
         provider,
         model,
         currency: 'USD',
         ...(limit ? { limit } : {}),
+        ...(capabilities ? { capabilities } : {}),
         name: typeof node.name === 'string' ? node.name.slice(0, 200) : model,
         providerName: typeof source.name === 'string' ? source.name.slice(0, 200) : provider,
         input: amount(cost.input),
@@ -76,7 +79,7 @@ export function parseCatalogEntries(value: unknown): CatalogPrice[] {
         cacheWrite: amount(cost.cache_write),
         tiered: (Array.isArray(cost.tiers) && cost.tiers.length > 0) || !!cost.context_over_200k
       }
-      if (PRICE_FIELDS.some((field) => price[field] !== null) || limit || node.name)
+      if (PRICE_FIELDS.some((field) => price[field] !== null) || limit || node.name || capabilities)
         entries.push(price)
     }
   }
@@ -87,10 +90,18 @@ function defaultPrices(entries: CatalogPrice[]): DefaultModelPrice[] {
   return Object.entries(catalogProviders).flatMap(([provider, id]) =>
     entries
       .filter((p) => p.provider === id)
-      .map(({ name: _name, providerName: _providerName, limit: _limit, ...p }) => ({
-        ...p,
-        provider: provider as Provider
-      }))
+      .map(
+        ({
+          name: _name,
+          providerName: _providerName,
+          limit: _limit,
+          capabilities: _capabilities,
+          ...p
+        }) => ({
+          ...p,
+          provider: provider as Provider
+        })
+      )
   )
 }
 export function parseModelPriceCatalog(value: unknown): DefaultModelPrice[] {
@@ -116,7 +127,7 @@ export class ModelPriceCatalog {
       if (raw.length > 20_000_000) throw new Error('cache too large')
       const data = object(JSON.parse(raw))
       if (
-        (data.version !== 2 && data.version !== 3) ||
+        (data.version !== 2 && data.version !== 3 && data.version !== 4) ||
         !Number.isSafeInteger(data.updatedAt) ||
         (data.updatedAt as number) <= 0 ||
         (data.updatedAt as number) > this.now() ||
@@ -144,6 +155,9 @@ export class ModelPriceCatalog {
           name: node.name.slice(0, 200),
           providerName: node.providerName.slice(0, 200),
           ...(modelLimit(node.limit) ? { limit: modelLimit(node.limit) } : {}),
+          ...(parseRegistryCapabilities(node.capabilities)
+            ? { capabilities: parseRegistryCapabilities(node.capabilities) }
+            : {}),
           tiered: node.tiered
         }
       })
@@ -151,7 +165,7 @@ export class ModelPriceCatalog {
         new Set(entries.map((p) => JSON.stringify([p.provider, p.model]))).size !== entries.length
       )
         throw new Error('duplicate prices')
-      this.needsMetadataRefresh = data.version === 2
+      this.needsMetadataRefresh = data.version !== 4
       this.state = {
         prices: defaultPrices(entries),
         entries,
@@ -211,7 +225,7 @@ export class ModelPriceCatalog {
       const prices = defaultPrices(entries)
       const updatedAt = this.now()
       await mkdir(dirname(this.file), { recursive: true })
-      await writeFile(`${this.file}.tmp`, JSON.stringify({ version: 3, entries, updatedAt }), {
+      await writeFile(`${this.file}.tmp`, JSON.stringify({ version: 4, entries, updatedAt }), {
         mode: 0o600
       })
       await rename(`${this.file}.tmp`, this.file)

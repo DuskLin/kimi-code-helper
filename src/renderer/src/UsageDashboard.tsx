@@ -212,10 +212,14 @@ function Trend({ points, hourly }: { points: UsageStats['points']; hourly: boole
 
 export function UsageDashboard({
   interval,
-  onAccountStats
+  onAccountStats,
+  showTokenActivity,
+  showUsageTrend
 }: {
   interval: number
   onAccountStats: (stats: UsageStats['byAccount']) => void
+  showTokenActivity: boolean
+  showUsageTrend: boolean
 }) {
   const cacheTooltipId = useId()
   const [data, setData] = useState<UsageStats>()
@@ -239,11 +243,13 @@ export function UsageDashboard({
             end: end.getTime(),
             bucketMs: 3600000
           }),
-          window.kimiHelper.getUsageStats({
-            ...heatmapRange(),
-            bucketMs: 86400000,
-            allHistory: true
-          })
+          showTokenActivity
+            ? window.kimiHelper.getUsageStats({
+                ...heatmapRange(),
+                bucketMs: 86400000,
+                allHistory: true
+              })
+            : undefined
         ])
         if (active) {
           setData(result)
@@ -266,7 +272,7 @@ export function UsageDashboard({
       active = false
       clearTimeout(timer)
     }
-  }, [interval, onAccountStats, retry])
+  }, [interval, onAccountStats, retry, showTokenActivity])
   const s = data?.summary
   const metrics: {
     label: string
@@ -276,6 +282,8 @@ export function UsageDashboard({
     { label: '新增输入', key: 'input', icon: ArrowDown },
     { label: '输出', key: 'output', icon: ArrowUp }
   ]
+  // 账号卡片仍依赖当天性能统计，隐藏面板时保持数据刷新。
+  if (!showTokenActivity && !showUsageTrend) return null
   return (
     <section className="usage-dashboard" aria-label="使用统计">
       {error && (
@@ -286,115 +294,123 @@ export function UsageDashboard({
           </button>
         </p>
       )}
-      <UsageHeatmap data={calendar} loading={loading} />
-      <div className="usage-hero">
-        <div className="usage-total">
-          <div>
-            <small>
-              <Zap size={13} />
-              真实消耗 Tokens
-            </small>
-            <strong title={exact(s?.totalTokens)}>{loading ? '…' : exact(s?.totalTokens)}</strong>
-          </div>
-        </div>
-        <div className="usage-metrics">
-          {metrics.map(({ label, key, icon: Icon }) => (
-            <div key={key} title={exact(s?.[key])}>
-              <small>
-                <Icon size={13} />
-                {label}
-              </small>
-              <strong>{compact(s?.[key])}</strong>
-            </div>
-          ))}
-          <div className="cache-hit-metric">
-            <small>
-              <Sparkles size={13} />
-              缓存命中
-            </small>
-            <div className="cache-hit-amount">
-              <div
-                className="cache-hit-ring"
-                tabIndex={0}
-                aria-describedby={cacheTooltipId}
-                role="progressbar"
-                aria-label="缓存命中率"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={s?.cacheHitRate == null ? undefined : s.cacheHitRate * 100}
-                aria-valuetext={
-                  s?.cacheHitRate == null ? '未知' : `${(s.cacheHitRate * 100).toFixed(1)}%`
-                }
-              >
-                <svg viewBox="0 0 48 48" aria-hidden="true">
-                  <circle
-                    cx="24"
-                    cy="24"
-                    r="20"
-                    fill="none"
-                    stroke="var(--border)"
-                    strokeWidth="4"
-                  />
-                  <circle
-                    cx="24"
-                    cy="24"
-                    r="20"
-                    fill="none"
-                    stroke="var(--accent)"
-                    strokeWidth="4"
-                    pathLength="100"
-                    strokeDasharray={`${Math.min(100, Math.max(0, (s?.cacheHitRate ?? 0) * 100))} 100`}
-                    transform="rotate(-90 24 24)"
-                  />
-                </svg>
-                <span id={cacheTooltipId} role="tooltip" className="cache-hit-tooltip">
-                  {s?.cacheHitRate == null
-                    ? '命中率未知'
-                    : `命中率 ${(s.cacheHitRate * 100).toFixed(1)}%`}
-                </span>
+      {showTokenActivity && <UsageHeatmap data={calendar} loading={loading} />}
+      {showUsageTrend && (
+        <>
+          <div className="usage-hero">
+            <div className="usage-total">
+              <div>
+                <small>
+                  <Zap size={13} />
+                  真实消耗 Tokens
+                </small>
+                <strong title={exact(s?.totalTokens)}>
+                  {loading ? '…' : exact(s?.totalTokens)}
+                </strong>
               </div>
-              <strong title={`缓存命中 ${exact(s?.cacheRead)} tokens`}>
-                {compact(s?.cacheRead)}
-              </strong>
+            </div>
+            <div className="usage-metrics">
+              {metrics.map(({ label, key, icon: Icon }) => (
+                <div key={key} title={exact(s?.[key])}>
+                  <small>
+                    <Icon size={13} />
+                    {label}
+                  </small>
+                  <strong>{compact(s?.[key])}</strong>
+                </div>
+              ))}
+              <div className="cache-hit-metric">
+                <small>
+                  <Sparkles size={13} />
+                  缓存命中
+                </small>
+                <div className="cache-hit-amount">
+                  <div
+                    className="cache-hit-ring"
+                    tabIndex={0}
+                    aria-describedby={cacheTooltipId}
+                    role="progressbar"
+                    aria-label="缓存命中率"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={s?.cacheHitRate == null ? undefined : s.cacheHitRate * 100}
+                    aria-valuetext={
+                      s?.cacheHitRate == null ? '未知' : `${(s.cacheHitRate * 100).toFixed(1)}%`
+                    }
+                  >
+                    <svg viewBox="0 0 48 48" aria-hidden="true">
+                      <circle
+                        cx="24"
+                        cy="24"
+                        r="20"
+                        fill="none"
+                        stroke="var(--border)"
+                        strokeWidth="4"
+                      />
+                      <circle
+                        cx="24"
+                        cy="24"
+                        r="20"
+                        fill="none"
+                        stroke="var(--accent)"
+                        strokeWidth="4"
+                        pathLength="100"
+                        strokeDasharray={`${Math.min(100, Math.max(0, (s?.cacheHitRate ?? 0) * 100))} 100`}
+                        transform="rotate(-90 24 24)"
+                      />
+                    </svg>
+                    <span id={cacheTooltipId} role="tooltip" className="cache-hit-tooltip">
+                      {s?.cacheHitRate == null
+                        ? '命中率未知'
+                        : `命中率 ${(s.cacheHitRate * 100).toFixed(1)}%`}
+                    </span>
+                  </div>
+                  <strong title={`缓存命中 ${exact(s?.cacheRead)} tokens`}>
+                    {compact(s?.cacheRead)}
+                  </strong>
+                </div>
+              </div>
+              <div>
+                <small>
+                  <Activity size={13} />
+                  总请求数
+                </small>
+                <strong>{s?.requests ?? '—'}</strong>
+              </div>
+              <div title="上游报告费用优先，否则按当前模型单价计算；缺失价格与用量按 0 计，不同币种分别汇总">
+                <small>
+                  <DollarSign size={13} />
+                  总成本
+                </small>
+                <strong className="usage-cost-value">{s ? formatUsageCost(s) : '—'}</strong>
+              </div>
+              <div
+                tabIndex={0}
+                title={`按网关检测到的中断事件统计：客户端 ${s?.interruptionCounts.client ?? 0} · 超时 ${s?.interruptionCounts.timeout ?? 0} · 上游 ${s?.interruptionCounts.upstream ?? 0} · 退出 ${s?.interruptionCounts.shutdown ?? 0}\n已报告用量 ${s?.interruptedReported ?? 0} / ${s?.interruptedRequests ?? 0} · ${exact(s?.interruptedTokens)} tokens · ${s ? formatUsageCost({ cost: s.interruptedCost, costAmounts: s.interruptedCostAmounts }) : '未知'}\n用量仅包含中断前已报告的部分`}
+              >
+                <small>
+                  <CircleSlash size={13} />
+                  中断请求
+                </small>
+                <strong>{s?.interruptedRequests ?? 0} 次</strong>
+              </div>
             </div>
           </div>
-          <div>
-            <small>
-              <Activity size={13} />
-              总请求数
-            </small>
-            <strong>{s?.requests ?? '—'}</strong>
+          <div className="usage-trend">
+            <div className="usage-trend-heading">
+              <h3>使用趋势</h3>
+              <small>当天</small>
+            </div>
+            {data ? (
+              <Trend points={data.points.filter((point) => point.time <= Date.now())} hourly />
+            ) : (
+              <div className="usage-chart-placeholder">
+                {loading ? '正在加载…' : '暂无统计数据'}
+              </div>
+            )}
           </div>
-          <div title="上游报告费用优先，否则按当前模型单价计算；缺失价格与用量按 0 计，不同币种分别汇总">
-            <small>
-              <DollarSign size={13} />
-              总成本
-            </small>
-            <strong>{s ? formatUsageCost(s) : '—'}</strong>
-          </div>
-          <div
-            tabIndex={0}
-            title={`按网关检测到的中断事件统计：客户端 ${s?.interruptionCounts.client ?? 0} · 超时 ${s?.interruptionCounts.timeout ?? 0} · 上游 ${s?.interruptionCounts.upstream ?? 0} · 退出 ${s?.interruptionCounts.shutdown ?? 0}\n已报告用量 ${s?.interruptedReported ?? 0} / ${s?.interruptedRequests ?? 0} · ${exact(s?.interruptedTokens)} tokens · ${s ? formatUsageCost({ cost: s.interruptedCost, costAmounts: s.interruptedCostAmounts }) : '未知'}\n用量仅包含中断前已报告的部分`}
-          >
-            <small>
-              <CircleSlash size={13} />
-              中断请求
-            </small>
-            <strong>{s?.interruptedRequests ?? 0} 次</strong>
-          </div>
-        </div>
-      </div>
-      <div className="usage-trend">
-        <div className="usage-trend-heading">
-          <h3>使用趋势</h3>
-          <small>当天</small>
-        </div>
-        {data ? (
-          <Trend points={data.points.filter((point) => point.time <= Date.now())} hourly />
-        ) : (
-          <div className="usage-chart-placeholder">{loading ? '正在加载…' : '暂无统计数据'}</div>
-        )}
-      </div>
+        </>
+      )}
     </section>
   )
 }

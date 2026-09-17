@@ -19,6 +19,7 @@ import {
   type StoredGroup
 } from '../src/main/services/gateway-store'
 import { Gateway } from '../src/main/services/gateway'
+import { lanAddresses, isPrivateIPv4 } from '../src/main/services/lan-addresses'
 import { Scheduler } from '../src/main/services/scheduler'
 import { KimiCapabilities, reportedConcurrency } from '../src/main/services/kimi-capabilities'
 import { parseKimiQuota, quotaWindow } from '../src/shared/kimi-quota'
@@ -267,8 +268,8 @@ test('api.json exports a live authenticated Kimi Code registry without secrets',
     const url = gateway.connection({ groupId: group.id, format: 'registry' })
     assert.equal(url, `${reserved.url}/api.json`)
     const headers = { authorization: `Bearer ${group.key}` }
-    assert.equal((await fetch(url)).status, 401)
-    assert.equal((await fetch(url, { headers: { authorization: 'Bearer wrong' } })).status, 401)
+    assert.equal((await fetch(url)).status, 200)
+    assert.equal((await fetch(url, { headers: { authorization: 'Bearer wrong' } })).status, 200)
     assert.equal((await fetch(url, { method: 'POST', headers })).status, 405)
     assert.equal(
       (await fetch(url, { headers: { ...headers, origin: 'https://example.com' } })).status,
@@ -471,6 +472,147 @@ async function storeFixture() {
   await store.load()
   return { store, file, secrets, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }
+
+test('LAN sharing preserves loopback, requires authentication and advertises the reached address', async () => {
+  const f = await storeFixture()
+  const gateway = new Gateway(f.store, undefined, undefined, async () => Response.json({}))
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    assert.equal(f.store.get().settings.lanSharing, false)
+    assert.deepEqual(gateway.snapshot().lanBaseUrls, [])
+    assert.throws(
+      () => gateway.connection({ groupId: 'default', format: 'url', lanAddress: '192.168.1.2' }),
+      /不可用/
+    )
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port, lanSharing: true })
+    const reloaded = new GatewayStore(f.file, f.secrets)
+    await reloaded.load()
+    assert.equal(reloaded.get().settings.lanSharing, true)
+    await gateway.setRunning(true)
+    await assert.rejects(
+      gateway.saveSettings({ ...f.store.get().settings, lanSharing: false }),
+      /停止网关/
+    )
+    const group = f.store.get().groups[0]
+    const headers = { authorization: `Bearer ${group.key}`, host: 'untrusted.example' }
+    const urls = [reserved.url, ...gateway.snapshot().lanBaseUrls]
+    for (const url of urls) {
+      assert.equal(
+        (
+          await fetch(`${url}/api.json`, {
+            headers: { host: '127.0.0.1', 'x-forwarded-for': '127.0.0.1' }
+          })
+        ).status,
+        url === reserved.url ? 200 : 401
+      )
+      const result = await fetch(`${url}/api.json`, { headers })
+      assert.equal(result.status, 200)
+      assert.equal((await result.json())['kimi-code-helper'].api, `${url}/v1`)
+      if (url !== reserved.url) {
+        const lanAddress = new URL(url).hostname
+        assert.equal(
+          gateway.connection({ groupId: group.id, format: 'url', lanAddress }),
+          `${url}/v1`
+        )
+        assert.equal(
+          gateway.connection({ groupId: group.id, format: 'registry', lanAddress }),
+          `${url}/api.json`
+        )
+      }
+    }
+    await gateway.setRunning(false)
+    await gateway.saveSettings({ ...f.store.get().settings, lanSharing: false })
+    await gateway.setRunning(true)
+    assert.deepEqual(gateway.snapshot().lanBaseUrls, [])
+    assert.equal((await fetch(`${reserved.url}/v1/models`, { headers })).status, 200)
+    for (const address of lanAddresses()) {
+      await assert.rejects(
+        fetch(`http://${address}:${reserved.port}/v1/models`, {
+          headers,
+          signal: AbortSignal.timeout(1000)
+        })
+      )
+    }
+  } finally {
+    await gateway.shutdown()
+    await f.cleanup()
+  }
+})
+
+test('gateway key survives restarts; manual rotation revokes old key and persists new key', async () => {
+  const f = await storeFixture()
+  const gateway = new Gateway(f.store)
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    const oldKey = gateway.connection({ groupId: 'default', format: 'key' })
+    await gateway.setRunning(true)
+    await gateway.setRunning(false)
+    await gateway.setRunning(true)
+    assert.equal(gateway.connection({ groupId: 'default', format: 'key' }), oldKey)
+    const reload = new GatewayStore(f.file, f.secrets)
+    await reload.load()
+    assert.equal(reload.get().groups[0].key, oldKey)
+    await assert.rejects(gateway.rotateKey('default'), /局域网共享/)
+    await gateway.setRunning(false)
+    await gateway.saveSettings({ ...f.store.get().settings, lanSharing: true })
+    await gateway.setRunning(true)
+    await assert.rejects(gateway.rotateKey('missing'), /分组不存在/)
+    assert.equal(gateway.connection({ groupId: 'default', format: 'key' }), oldKey)
+    const result = await gateway.rotateKey('default')
+    const nextKey = gateway.connection({ groupId: 'default', format: 'key' })
+    assert.notEqual(nextKey, oldKey)
+    assert.match(nextKey, /^[a-f0-9]{64}$/)
+    assert.ok(!JSON.stringify(result).includes(nextKey))
+    const request = (key: string) =>
+      fetch(`${reserved.url}/v1/models`, { headers: { authorization: `Bearer ${key}` } })
+    assert.equal((await request(oldKey)).status, 200)
+    for (const url of gateway.snapshot().lanBaseUrls) {
+      assert.equal(
+        (await fetch(`${url}/v1/models`, { headers: { authorization: `Bearer ${oldKey}` } }))
+          .status,
+        401
+      )
+      assert.equal(
+        (await fetch(`${url}/v1/models`, { headers: { authorization: `Bearer ${nextKey}` } }))
+          .status,
+        200
+      )
+    }
+    assert.equal((await request(nextKey)).status, 200)
+    await reload.load()
+    assert.equal(reload.get().groups[0].key, nextKey)
+    await gateway.setRunning(false)
+    await gateway.setRunning(true)
+    assert.equal(gateway.connection({ groupId: 'default', format: 'key' }), nextKey)
+  } finally {
+    await gateway.shutdown()
+    await f.cleanup()
+  }
+})
+
+test('LAN addresses exclude loopback, public addresses and IPv6; prefer 192.168', () => {
+  const entry = (address: string, internal = false) => ({
+    address,
+    internal,
+    family: 'IPv4' as const,
+    netmask: '255.255.255.0',
+    mac: '00:00:00:00:00:00',
+    cidr: `${address}/24`
+  })
+  assert.deepEqual(
+    lanAddresses({
+      lo: [entry('127.0.0.1', true)],
+      en0: [entry('10.1.2.3'), entry('192.168.1.2'), entry('8.8.8.8')],
+      en1: [entry('192.168.1.2'), entry('172.16.0.2')]
+    }),
+    ['192.168.1.2', '10.1.2.3', '172.16.0.2']
+  )
+  for (const address of ['172.15.0.1', '172.32.0.1', '192.169.0.1', '10.0.0.999', '::1'])
+    assert.equal(isPrivateIPv4(address), false)
+})
 async function listen(handler: (req: IncomingMessage, res: ServerResponse) => void) {
   const server = createServer(handler)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -919,7 +1061,7 @@ test('真实 HTTP 转发、分组密钥隔离与会话保持，凭据不出现�
     assert.match(sessions[0]!, /^[0-9a-f]{64}$/)
     assert.notEqual(sessions[0], 'session-1')
     assert.equal(new Set(received.slice(-3).map((r) => r.auth)).size, 1)
-    assert.equal((await f.post({}, { authorization: 'Bearer wrong' })).status, 401)
+    assert.equal((await f.post({}, { authorization: 'Bearer wrong' })).status, 200)
     assert.equal((await f.post({}, { origin: 'https://evil.example' })).status, 403)
     await f.store.saveGroup({
       name: 'other',
@@ -1674,6 +1816,250 @@ test('手动并发上限持久化、控制槽位，刷新保留且可恢复自�
     await restored.saveAccount({ ...saved, concurrencyOverride: null })
     assert.equal(restored.get().accounts[0].maxConcurrency, 60)
     assert.equal(restored.get().accounts[0].concurrencyOverride, null)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('live graph observes sticky identities and streaming usage before requests finish', async () => {
+  let upstreamResponse: ServerResponse | undefined
+  const f = await gatewayFixture((_req, res) => {
+    upstreamResponse = res
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n')
+  })
+  try {
+    const response = await f.post(
+      { stream: true, prompt_cache_key: 'sticky-agent' },
+      { 'user-agent': 'Key/1.0' }
+    )
+    await eventually(() => f.gateway.snapshot().liveFlows?.[0]?.state === 'streaming')
+    const live = f.gateway.snapshot().liveFlows![0]
+    assert.equal(live.harness, 'Key')
+    assert.equal(live.identity, 'session')
+    assert.equal(live.endedAt, null)
+    assert.ok(live.bytes > 0)
+    assert.ok((live.uploadBytes ?? 0) > 0)
+    assert.ok(live.lastUploadAt != null && live.lastUploadAt <= live.lastActivityAt!)
+    upstreamResponse!.end(
+      'data: {"usage":{"prompt_tokens":10,"completion_tokens":2}}\n\ndata: [DONE]\n\n'
+    )
+    const body = await response.text()
+    assert.ok(body.includes('hello'))
+    await eventually(() => f.gateway.snapshot().liveFlows?.[0]?.state === 'completed')
+    assert.equal(f.gateway.snapshot().liveFlows![0].usage?.output, 2)
+    const next = await f.post(
+      { stream: true, prompt_cache_key: 'sticky-agent' },
+      { 'user-agent': 'Key/2.0' }
+    )
+    assert.equal(f.gateway.snapshot().liveFlows![1].agentKey, live.agentKey)
+    upstreamResponse!.end('data: [DONE]\n\n')
+    await next.text()
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('harness endpoints identify every supported client and preserve protocol paths, auth and UA', async () => {
+  const forwarded: {
+    path: string
+    ua: string | undefined
+    auth: string | undefined
+    hint: string | string[] | undefined
+  }[] = []
+  const f = await gatewayFixture((req, res) => {
+    forwarded.push({
+      path: req.url!,
+      ua: req.headers['user-agent'],
+      auth: req.headers.authorization,
+      hint: req.headers['x-kimi-helper-harness']
+    })
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }))
+  })
+  try {
+    const { HARNESSES } = await import('../src/shared/live-flow')
+    for (const h of HARNESSES) {
+      const response = await f.post(
+        {},
+        { 'user-agent': 'OpenAI/JS 6.0' },
+        `/harness/${h.id}/v1/chat/completions?trace=1`
+      )
+      assert.equal(response.status, 200)
+      await response.text()
+      await eventually(() => f.gateway.snapshot().liveFlows?.at(-1)?.endedAt != null)
+      assert.equal(f.gateway.snapshot().liveFlows!.at(-1)!.harness, h.name)
+      assert.equal(forwarded.at(-1)!.path, '/coding/v1/chat/completions?trace=1')
+      assert.equal(forwarded.at(-1)!.ua, 'OpenAI/JS 6.0')
+      assert.ok(forwarded.at(-1)!.auth?.startsWith('Bearer '))
+    }
+    for (const route of ['messages', 'responses']) {
+      const response = await f.post({}, { 'user-agent': 'node' }, `/harness/cline/v1/${route}`)
+      assert.equal(response.status, 200)
+      await response.text()
+      assert.equal(forwarded.at(-1)!.path, `/coding/v1/${route}`)
+    }
+    const listed = await fetch(`${f.url}/harness/qoder/v1/models`)
+    assert.equal(listed.status, 200)
+    assert.ok((await listed.json()).data.some((m: { id: string }) => m.id === 'kimi-for-coding'))
+    const header = await f.post({}, { 'user-agent': 'node', 'x-kimi-helper-harness': 'workbuddy' })
+    await header.text()
+    await eventually(() => f.gateway.snapshot().liveFlows?.at(-1)?.endedAt != null)
+    assert.equal(f.gateway.snapshot().liveFlows!.at(-1)!.harness, 'WorkBuddy')
+    assert.equal(forwarded.at(-1)!.hint, undefined)
+    const before = forwarded.length
+    for (const path of ['/harness/fake/v1/messages', '/harness/cline/groups/other/v1/messages']) {
+      const denied = await f.post({}, {}, path)
+      assert.equal(denied.status, path.includes('fake') ? 404 : 401)
+      await denied.text()
+    }
+    const crossOrigin = await f.post(
+      {},
+      { origin: 'https://example.com' },
+      '/harness/pi/v1/messages'
+    )
+    assert.equal(crossOrigin.status, 403)
+    await crossOrigin.text()
+    assert.equal(forwarded.length, before)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('Kimi Code hosts and native platform fallback work through the ordinary gateway URL', async () => {
+  const f = await gatewayFixture((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }))
+  })
+  try {
+    for (const headers of [
+      { 'user-agent': 'kimi-code-cli/1.0.0 (web)' },
+      { 'user-agent': 'kimi-code-desktop/0.0.13' },
+      { 'user-agent': 'kimi-code-vscode/1.0' },
+      { 'user-agent': 'OpenAI/JS 6.0', 'x-msh-platform': 'kimi_code_desktop' }
+    ]) {
+      const response = await f.post({}, { ...headers, 'x-session-id': 'kimi-test' } as Record<
+        string,
+        string
+      >)
+      assert.equal(response.status, 200)
+      await response.text()
+      await eventually(() => f.gateway.snapshot().liveFlows?.at(-1)?.endedAt != null)
+      assert.equal(f.gateway.snapshot().liveFlows!.at(-1)!.harness, 'Kimi Code')
+      assert.equal(f.gateway.snapshot().liveFlows!.at(-1)!.identity, 'session')
+    }
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('deleted account models stay excluded after sync and restart, can be restored, and leave other accounts unchanged', async () => {
+  const f = await storeFixture()
+  let upstreamModels = ['keep', 'remove']
+  const gateway = new Gateway(
+    f.store,
+    undefined,
+    async () => Response.json({ data: upstreamModels.map((id) => ({ id })) }),
+    async () => Response.json({})
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveAccount(accountInput('a'))
+    await gateway.saveAccount(accountInput('b'))
+    const a = f.store.get().accounts[0]
+    await gateway.saveAccount({ ...a, excludedModels: ['remove'] })
+    assert.deepEqual(f.store.get().accounts[0].models, ['keep'])
+    assert.deepEqual(f.store.get().accounts[1].models, ['keep', 'remove'])
+    upstreamModels = ['keep', 'remove', 'new']
+    await gateway.refreshAccount(a.id)
+    assert.deepEqual(f.store.get().accounts[0].models, ['keep', 'new'])
+    assert.deepEqual(f.store.get().accounts[0].capabilities?.models, upstreamModels)
+    const restored = new GatewayStore(f.file, f.secrets)
+    await restored.load()
+    assert.deepEqual(restored.get().accounts[0].models, ['keep', 'new'])
+    assert.deepEqual(restored.get().accounts[0].excludedModels, ['remove'])
+    await gateway.saveAccount({ ...f.store.get().accounts[1], enabled: false })
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const headers = { authorization: `Bearer ${f.store.get().groups[0].key}` }
+    const list = await (await fetch(`${reserved.url}/v1/models`, { headers })).json()
+    assert.deepEqual(
+      list.data.map((model: { id: string }) => model.id),
+      ['keep', 'new']
+    )
+    const registry = await (await fetch(`${reserved.url}/api.json`, { headers })).json()
+    assert.deepEqual(Object.keys(registry['kimi-code-helper'].models), ['keep', 'new'])
+    const rejected = await fetch(`${reserved.url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'remove', messages: [{ role: 'user', content: 'test' }] })
+    })
+    assert.equal(rejected.status, 503)
+    await rejected.text()
+    await gateway.saveAccount({ ...f.store.get().accounts[0], excludedModels: [] })
+    assert.deepEqual(f.store.get().accounts[0].models, upstreamModels)
+    await assert.rejects(gateway.saveAccount({ ...a, excludedModels: 'remove' }), /已删除模型列表/)
+  } finally {
+    await gateway.shutdown()
+    gateway.history.close()
+    await f.cleanup()
+  }
+})
+
+test('five live child calls using one sticky session aggregate into one node with five active requests', async () => {
+  const responses: ServerResponse[] = []
+  const f = await gatewayFixture(
+    (_req, res) => {
+      responses.push(res)
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n')
+    },
+    ['a', 'b', 'c']
+  )
+  try {
+    const calls = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        f.post(
+          { stream: true, prompt_cache_key: 'shared-parent' },
+          { 'user-agent': 'kimi-code-desktop/1' }
+        )
+      )
+    )
+    assert.ok(calls.every((r) => r.status === 200))
+    await eventually(
+      () => f.gateway.snapshot().liveFlows?.filter((f) => f.state === 'streaming').length === 5
+    )
+    const flows = f.gateway.snapshot().liveFlows!
+    assert.equal(new Set(flows.map((f) => f.agentKey)).size, 1)
+    assert.equal(flows.filter((f) => f.endedAt === null).length, 5)
+    assert.ok(flows.every((f) => f.identity === 'session'))
+    for (const res of responses) res.end('data: [DONE]\n\n')
+    await Promise.all(calls.map((r) => r.text()))
+    await eventually(() => f.gateway.snapshot().liveFlows!.every((f) => f.endedAt !== null))
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('idle node retention is validated, defaults for older settings and persists', async () => {
+  const { validateGateway } = await import('../src/main/services/gateway-store')
+  const f = await storeFixture()
+  try {
+    const base = f.store.get().settings
+    const { flowIdleMinutes: _unused, ...legacy } = base
+    assert.equal(validateGateway(legacy).flowIdleMinutes, 5)
+    for (const minutes of [5, 10, 15, 30, 60]) {
+      const settings = validateGateway({ ...base, flowIdleMinutes: minutes })
+      await f.store.mutate((data) => {
+        data.settings = settings
+      })
+      const restored = new GatewayStore(f.file, f.secrets)
+      await restored.load()
+      assert.equal(restored.get().settings.flowIdleMinutes, minutes)
+    }
+    for (const value of [0, 6, 90, -5, '10', null, NaN])
+      assert.throws(() => validateGateway({ ...base, flowIdleMinutes: value }), /空闲节点保留/)
   } finally {
     await f.cleanup()
   }

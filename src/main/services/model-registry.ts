@@ -1,4 +1,5 @@
 import type { CatalogPrice, ModelPrice, Provider } from '../../shared/contracts'
+import { mergeRegistryCapabilities } from './registry-capabilities'
 import { catalogProviders } from './model-price-catalog'
 
 type RegistryAccount = { provider?: Provider; models: string[] }
@@ -31,9 +32,9 @@ export function registryModels(
   const models = [...new Set(accounts.flatMap((account) => account.models))]
   return Object.fromEntries(
     models.map((id) => {
-      const matches = accounts
+      const candidates = accounts
         .filter((account) => account.models.includes(id))
-        .flatMap((account) => {
+        .map((account) => {
           const provider = account.provider ?? 'kimi'
           const mapping = prices.find(
             (price) => price.provider === provider && price.model === id
@@ -43,8 +44,10 @@ export function registryModels(
               mapping ? [mapping.provider, mapping.model] : [catalogProviders[provider], id]
             )
           )
-          return entry ? [entry] : []
+          return entry
         })
+      const matches = candidates.filter((entry) => entry !== undefined)
+      const capabilities = mergeRegistryCapabilities(candidates.map((entry) => entry?.capabilities))
       const name = matches.map((entry) => entry.name.trim()).find((name) => name && name !== id)
       const limit: NonNullable<CatalogPrice['limit']> = {}
       for (const key of ['context', 'output'] as const) {
@@ -54,7 +57,12 @@ export function registryModels(
       }
       return [
         id,
-        { id, name: name ?? displayName(id), ...(Object.keys(limit).length ? { limit } : {}) }
+        {
+          id,
+          name: name ?? displayName(id),
+          ...(Object.keys(limit).length ? { limit } : {}),
+          ...capabilities
+        }
       ]
     })
   )

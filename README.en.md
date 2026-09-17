@@ -35,6 +35,8 @@ Kimi Code Helper combines provider accounts into a local pool and gives coding a
 
 ## Screenshots
 
+The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Kimi Code Helper” (Quit Kimi Code Helper) to stop the gateway and exit; macOS also supports ⌘Q.
+
 ### Dark overview
 
 Check account availability, quota windows, model performance, and token activity in one place.

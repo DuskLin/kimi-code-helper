@@ -1,3 +1,4 @@
+import { FLOW_IDLE_MINUTES } from '../../shared/live-flow'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -62,10 +63,15 @@ function boolean(value: unknown): boolean {
 }
 export function validateGateway(value: unknown): GatewaySettings {
   const v = object(value)
+  const flowIdleMinutes = v.flowIdleMinutes === undefined ? 5 : v.flowIdleMinutes
+  if (!(FLOW_IDLE_MINUTES as readonly unknown[]).includes(flowIdleMinutes))
+    throw new Error('空闲节点保留时间须为 5、10、15、30 或 60 分钟')
   return {
+    flowIdleMinutes: flowIdleMinutes as number,
     stickySeconds: integer(v.stickySeconds ?? 300, 0, 86400, '会话保持时间'),
     port: integer(v.port, 1024, 65535, '端口'),
     autoStart: boolean(v.autoStart),
+    lanSharing: v.lanSharing === undefined ? false : boolean(v.lanSharing),
     timeoutSeconds: integer(v.timeoutSeconds, 5, 1800, '请求超时'),
     maxAttempts: integer(v.maxAttempts, 1, 10, '最大尝试次数'),
     cooldownSeconds: integer(v.cooldownSeconds, 1, 3600, '冷却时间')
@@ -117,6 +123,9 @@ export function validateAccount(value: unknown, groups: StoredGroup[]): AccountI
     ...(v.modelProtocols !== undefined
       ? { modelProtocols: validateModelProtocols(v.modelProtocols) }
       : {}),
+    ...(v.excludedModels !== undefined
+      ? { excludedModels: validateExcludedModels(v.excludedModels) }
+      : {}),
     region: v.region as AccountInput['region'],
     enabled: boolean(v.enabled),
     ...(v.concurrencyOverride !== undefined
@@ -157,11 +166,17 @@ export function validateModelProtocols(value: unknown): Record<string, ModelProt
   )
 }
 
+function validateExcludedModels(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 2000) throw new Error('已删除模型列表无效')
+  return [...new Set(value.map((model) => string(model, '模型', 200)))]
+}
+
 export function capabilityFields(
   region: AccountInput['region'],
   value: unknown,
   concurrencyOverride: number | null = null,
-  provider: Provider = 'kimi'
+  provider: Provider = 'kimi',
+  excludedModels: string[] = []
 ) {
   if (concurrencyOverride !== null) integer(concurrencyOverride, 1, 1000, '手动并发上限')
   let capabilities: AccountCapabilities | null = null
@@ -191,7 +206,7 @@ export function capabilityFields(
   }
   return {
     baseUrl: accountBaseUrl(region, provider),
-    models: capabilities?.models ?? [],
+    models: (capabilities?.models ?? []).filter((model) => !excludedModels.includes(model)),
     maxConcurrency:
       concurrencyOverride ?? capabilities?.maxConcurrency ?? DEFAULT_ACCOUNT_CONCURRENCY,
     concurrencyOverride,
@@ -205,6 +220,8 @@ export class GatewayStore {
     quotaCardOrder: [],
     settings: {
       port: 17300,
+      flowIdleMinutes: 5,
+      lanSharing: false,
       autoStart: false,
       timeoutSeconds: 300,
       maxAttempts: 3,
@@ -281,7 +298,8 @@ export class GatewayStore {
             input.region,
             legacy ? null : item.capabilities,
             input.concurrencyOverride,
-            input.provider
+            input.provider,
+            input.excludedModels
           ),
           id: string(item.id, '账号 ID'),
           credential: {
@@ -380,9 +398,12 @@ export class GatewayStore {
         old.credential.accessToken === nextCredential.accessToken
       const modelProtocols =
         input.modelProtocols ?? (old?.provider === input.provider ? old?.modelProtocols : undefined)
+      const excludedModels =
+        input.excludedModels ?? (old?.provider === input.provider ? old?.excludedModels : undefined)
       const account: StoredAccount = {
         ...input,
         ...(modelProtocols !== undefined ? { modelProtocols } : {}),
+        ...(excludedModels !== undefined ? { excludedModels } : {}),
         id,
         credential: nextCredential,
         ...capabilityFields(
@@ -391,7 +412,8 @@ export class GatewayStore {
           input.concurrencyOverride === undefined
             ? old?.concurrencyOverride
             : input.concurrencyOverride,
-          input.provider
+          input.provider,
+          excludedModels
         )
       }
       if (old) data.accounts[data.accounts.indexOf(old)] = account

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import {
+  formatUsageCost,
   summarizeActivity,
   parseUsage,
   heatmapRange,
@@ -617,4 +618,45 @@ test('session duration spans days and account switches without sticky expiry', (
     start + 50 * 3600000
   )
   assert.equal(result.longestChatMs, 48 * 3600000 + 120000)
+})
+
+test('cost display omits zero currencies while retaining nonzero mixed amounts and unknown totals', () => {
+  assert.equal(
+    formatUsageCost({
+      cost: null,
+      costAmounts: [
+        { currency: 'USD', value: 2.402607 },
+        { currency: 'CNY', value: 0 }
+      ]
+    }),
+    'USD 2.402607'
+  )
+  assert.equal(
+    formatUsageCost({
+      cost: null,
+      costAmounts: [
+        { currency: 'USD', value: 0 },
+        { currency: 'CNY', value: 3 }
+      ]
+    }),
+    'CNY 3.00'
+  )
+  assert.equal(
+    formatUsageCost({
+      cost: null,
+      costAmounts: [
+        { currency: 'USD', value: 2 },
+        { currency: 'CNY', value: 3 }
+      ]
+    }),
+    'USD 2.00 + CNY 3.00'
+  )
+  assert.equal(formatUsageCost({ cost: 0, costAmounts: [{ currency: 'USD', value: 0 }] }), '—')
+  assert.equal(formatUsageCost({ cost: 0, costAmounts: [] }), '—')
+  assert.equal(formatUsageCost({ cost: 0 }), '—')
+  assert.equal(formatUsageCost({ cost: null }), '未知')
+  assert.equal(
+    formatUsageCost({ cost: null, costAmounts: [{ currency: 'USD', value: 0.0000001 }] }),
+    'USD <0.000001'
+  )
 })

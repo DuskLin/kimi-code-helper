@@ -60,18 +60,29 @@ import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-pro
 import { OverlayScrollArea } from './OverlayScrollArea'
 import { KimiLogo } from './KimiLogo'
 import deepseekLogo from './assets/deepseek.svg'
+import { LiveFlowPanel } from './LiveFlowPanel'
 import { UsageDashboard } from './UsageDashboard'
 import type { UsageStats } from '../../shared/usage'
 import { performanceHistoryRange } from '../../shared/usage'
 
 const api = window.kimiHelper
 const cardDisplayKey = 'kimi-helper.card-display'
-function readCardDisplay(): { estimates: boolean; performance: boolean } {
+function readCardDisplay(): {
+  estimates: boolean
+  performance: boolean
+  tokenActivity: boolean
+  usageTrend: boolean
+} {
   try {
     const saved = JSON.parse(localStorage.getItem(cardDisplayKey) ?? '{}')
-    return { estimates: saved?.estimates !== false, performance: saved?.performance !== false }
+    return {
+      estimates: saved?.estimates !== false,
+      performance: saved?.performance !== false,
+      tokenActivity: saved?.tokenActivity !== false,
+      usageTrend: saved?.usageTrend !== false
+    }
   } catch {
-    return { estimates: true, performance: true }
+    return { estimates: true, performance: true, tokenActivity: true, usageTrend: true }
   }
 }
 const peakPeriodHint =
@@ -84,7 +95,13 @@ function AccountPerformance({
   account: Pick<AccountView, 'id' | 'name'>
 }) {
   const [historyOpen, setHistoryOpen] = useState(false)
-  const models = [...new Set(stats.map((item) => item.model))]
+  const models = [
+    ...new Set(
+      stats
+        .filter((item) => item.averageFirstTokenMs != null || item.averageTokensPerSecond != null)
+        .map((item) => item.model)
+    )
+  ]
   return (
     <section className="account-performance" aria-label="按模型峰谷性能">
       <div className="account-performance-heading">
@@ -729,6 +746,7 @@ function Modal({
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault()
+        event.stopPropagation()
         close()
       }}
     >
@@ -764,9 +782,15 @@ export interface GatewayStatus {
   error: string
 }
 
+export type GatewayPage = 'overview' | 'management' | 'flow'
+
 export function GatewayPanel({
-  onStatusChange
+  onStatusChange,
+  page,
+  setPage
 }: {
+  page: GatewayPage
+  setPage: (page: GatewayPage) => void
   onStatusChange: (status: GatewayStatus | undefined) => void
 }) {
   const [snapshot, setSnapshot] = useState<GatewaySnapshot>()
@@ -774,7 +798,6 @@ export function GatewayPanel({
   const [displaySettingsOpen, setDisplaySettingsOpen] = useState(false)
   const [accountSpeeds, setAccountSpeeds] = useState<UsageStats['byAccount']>([])
   const [usageRefreshInterval, setUsageRefreshInterval] = useState(5000)
-  const [page, setPage] = useState<'overview' | 'management'>('overview')
   const [tab, setTab] = useState<'accounts' | 'activity' | 'pricing'>('accounts')
   const [history, setHistory] = useState<RequestHistoryPage>()
   const [historyCursors, setHistoryCursors] = useState<(number | undefined)[]>([undefined])
@@ -815,6 +838,7 @@ export function GatewayPanel({
     AccountInput & { capabilities?: AccountCapabilities | null }
   >()
   const [settingsEdit, setSettingsEdit] = useState<GatewaySettings>()
+  const [rotatingKey, setRotatingKey] = useState(false)
   const [deleting, setDeleting] = useState<{
     type: 'account'
     id: string
@@ -917,8 +941,11 @@ export function GatewayPanel({
     memberships: [{ groupId: group.id, priority: 0, weight: 1 }],
     secret: ''
   })
-  const copy = (format: 'url' | 'key' | 'kimi' | 'anthropic' | 'registry') =>
-    void action(() => api.copyConnection({ groupId: group.id, format }), '已复制到剪贴板')
+  const copy = (format: 'url' | 'key' | 'registry', lanAddress?: string) =>
+    void action(
+      () => api.copyConnection({ groupId: group.id, format, lanAddress }),
+      '已复制到剪贴板'
+    )
   const order = new Map(cardDrag.order.map((id, index) => [id, index]))
   const linkedAccounts = snapshot.accounts
     .filter((account) => account.hasCredential)
@@ -934,62 +961,64 @@ export function GatewayPanel({
   }
   const stopBlocked = snapshot.running && snapshot.activeRequestCount > 0
   return (
-    <div className="gateway-workspace">
-      <div className="gateway-actions">
-        {page === 'management' && (
-          <button className="button back-to-overview" onClick={() => setPage('overview')}>
-            <ArrowLeft size={15} />
-            返回概览
-          </button>
-        )}
-        <div className="toolbar">
-          {page === 'overview' && (
-            <button
-              className="usage-refresh"
-              aria-label="切换自动刷新间隔"
-              title={`每 ${usageRefreshInterval / 1000} 秒自动刷新，点击切换为 ${usageRefreshInterval === 5000 ? 15 : usageRefreshInterval === 15000 ? 30 : 5} 秒`}
-              onClick={() =>
-                setUsageRefreshInterval((value) =>
-                  value === 5000 ? 15000 : value === 15000 ? 30000 : 5000
-                )
-              }
+    <div className={`gateway-workspace ${page === 'flow' ? 'flow-workspace' : ''}`}>
+      {page !== 'flow' && (
+        <div className="gateway-actions">
+          {page === 'management' && (
+            <button className="button back-to-overview" onClick={() => setPage('overview')}>
+              <ArrowLeft size={15} />
+              返回概览
+            </button>
+          )}
+          <div className="toolbar">
+            {page === 'overview' && (
+              <button
+                className="usage-refresh"
+                aria-label="切换自动刷新间隔"
+                title={`每 ${usageRefreshInterval / 1000} 秒自动刷新，点击切换为 ${usageRefreshInterval === 5000 ? 15 : usageRefreshInterval === 15000 ? 30 : 5} 秒`}
+                onClick={() =>
+                  setUsageRefreshInterval((value) =>
+                    value === 5000 ? 15000 : value === 15000 ? 30000 : 5000
+                  )
+                }
+              >
+                <RotateCcw size={14} />
+                <span>{usageRefreshInterval / 1000}s</span>
+              </button>
+            )}
+            {page === 'overview' && (
+              <button className="button" onClick={() => setDisplaySettingsOpen(true)}>
+                <PanelsTopLeft size={15} />
+                卡片显示
+              </button>
+            )}
+            {page === 'overview' && (
+              <button className="button" onClick={() => setPage('management')}>
+                <Users size={15} />
+                账号管理
+              </button>
+            )}
+            <button className="button" onClick={() => setSettingsEdit(snapshot.settings)}>
+              <Settings2 size={15} />
+              网关设置
+            </button>
+            <span
+              className={`gateway-toggle ${stopBlocked ? 'is-in-use' : ''}`}
+              title={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
             >
-              <RotateCcw size={14} />
-              <span>{usageRefreshInterval / 1000}s</span>
-            </button>
-          )}
-          {page === 'overview' && (
-            <button className="button" onClick={() => setDisplaySettingsOpen(true)}>
-              <PanelsTopLeft size={15} />
-              卡片显示
-            </button>
-          )}
-          {page === 'overview' && (
-            <button className="button" onClick={() => setPage('management')}>
-              <Users size={15} />
-              账号管理
-            </button>
-          )}
-          <button className="button" onClick={() => setSettingsEdit(snapshot.settings)}>
-            <Settings2 size={15} />
-            网关设置
-          </button>
-          <span
-            className={`gateway-toggle ${stopBlocked ? 'is-in-use' : ''}`}
-            title={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
-          >
-            <button
-              className={`button ${snapshot.running ? '' : 'primary'}`}
-              disabled={busy || stopBlocked}
-              aria-description={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
-              onClick={() => void action(() => api.setGatewayRunning(!snapshot.running))}
-            >
-              {snapshot.running ? <Square size={14} /> : <Play size={14} />}
-              {snapshot.running ? '停止网关' : '启动网关'}
-            </button>
-          </span>
+              <button
+                className={`button ${snapshot.running ? '' : 'primary'}`}
+                disabled={busy || stopBlocked}
+                aria-description={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
+                onClick={() => void action(() => api.setGatewayRunning(!snapshot.running))}
+              >
+                {snapshot.running ? <Square size={14} /> : <Play size={14} />}
+                {snapshot.running ? '停止网关' : '启动网关'}
+              </button>
+            </span>
+          </div>
         </div>
-      </div>
+      )}
       {(error || connectionError || snapshot.error) && (
         <div className="panel-error" role="alert">
           {error || connectionError || snapshot.error}
@@ -1003,6 +1032,18 @@ export function GatewayPanel({
           <Check size={15} />
           {notice}
         </div>
+      )}
+      {page === 'flow' && (
+        <LiveFlowPanel
+          flows={snapshot.liveFlows ?? []}
+          idleMinutes={snapshot.settings.flowIdleMinutes ?? 5}
+          idleDisabled={busy || !!connectionError}
+          onIdleMinutesChange={(minutes) =>
+            action(() => api.saveGateway({ ...snapshot.settings, flowIdleMinutes: minutes }))
+          }
+          running={snapshot.running}
+          stale={!!connectionError}
+        />
       )}
       {page === 'overview' && (
         <section className="overview-quotas" aria-label="已关联账号额度">
@@ -1114,16 +1155,23 @@ export function GatewayPanel({
         </section>
       )}
       {page === 'overview' && (
-        <UsageDashboard interval={usageRefreshInterval} onAccountStats={setAccountSpeeds} />
+        <UsageDashboard
+          interval={usageRefreshInterval}
+          onAccountStats={setAccountSpeeds}
+          showTokenActivity={cardDisplay.tokenActivity}
+          showUsageTrend={cardDisplay.usageTrend}
+        />
       )}
       {displaySettingsOpen && (
         <Modal title="卡片显示" close={() => setDisplaySettingsOpen(false)}>
-          <p className="muted">选择所有账号卡片中显示的模块，修改后立即生效。</p>
+          <p className="muted">选择概览中显示的模块，修改后立即生效并自动保存。</p>
           <div className="card-display-options">
             {(
               [
                 ['estimates', '额度估算', '包含估算总额、估算可用、估算均值和缓存命中率'],
-                ['performance', '模型表现', '显示各模型的首 token 时间和生成速度']
+                ['performance', '模型表现', '显示各模型的首 token 时间和生成速度'],
+                ['tokenActivity', 'Token 活动', '显示累计 Token、聊天时长、连续天数和活动热力图'],
+                ['usageTrend', '用量统计与趋势', '显示当天的 Token 消耗、请求数、成本汇总和趋势图']
               ] as const
             ).map(([key, label, hint]) => (
               <label key={key}>
@@ -1158,7 +1206,7 @@ export function GatewayPanel({
                 [
                   ['accounts', '账号池', Users],
                   ['activity', '请求记录', Activity],
-                  ['pricing', 'AI 费用管理', Coins]
+                  ['pricing', '费用管理', Coins]
                 ] as const
               ).map(([id, name, Icon]) => (
                 <button role="tab" aria-selected={tab === id} key={id} onClick={() => setTab(id)}>
@@ -1187,37 +1235,63 @@ export function GatewayPanel({
                       <Copy size={13} />
                       地址
                     </button>
-                    <button className="text-button" onClick={() => copy('key')}>
-                      复制密钥
-                    </button>
                     <button className="text-button" onClick={() => copy('registry')}>
                       <Copy size={13} />
                       复制 api.json 链接
                     </button>
-                    <button className="text-button" onClick={() => copy('kimi')}>
-                      Kimi 配置
-                    </button>
-                    <button className="text-button" onClick={() => copy('anthropic')}>
-                      Claude 配置
-                    </button>
                   </div>
                 </div>
+                {(snapshot.lanBaseUrls ?? []).map((baseUrl) => (
+                  <div className="connection-strip" key={baseUrl} aria-label="局域网连接">
+                    <div>
+                      <span
+                        className={`status-dot ${snapshot.running && group.enabled ? 'on' : ''}`}
+                      />
+                      <code>{baseUrl}/v1</code>
+                    </div>
+                    <div className="toolbar">
+                      <button
+                        className="text-button"
+                        onClick={() => copy('url', new URL(baseUrl).hostname)}
+                      >
+                        <Copy size={13} />
+                        地址
+                      </button>
+                      <button className="text-button" onClick={() => copy('key')}>
+                        <Copy size={13} />
+                        密钥
+                      </button>
+                      <button
+                        className="text-button"
+                        onClick={() => copy('registry', new URL(baseUrl).hostname)}
+                      >
+                        <Copy size={13} />
+                        复制 api.json 链接
+                      </button>
+                      <button
+                        className="text-button"
+                        disabled={busy}
+                        onClick={() => setRotatingKey(true)}
+                      >
+                        <RotateCcw size={13} />
+                        轮换密钥
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {snapshot.settings.lanSharing && !snapshot.lanBaseUrls?.length && (
+                  <p className="muted">未检测到局域网 IPv4 地址，请连接 Wi-Fi 或有线网络。</p>
+                )}
                 <details className="connection-help">
                   <summary>如何接入客户端</summary>
                   <p>
                     Kimi Code：启动网关，复制「api.json 链接」，在「添加供应商 → 注册表」中粘贴到
-                    「注册表 URL」，再将「复制密钥」得到的网关密钥填入「API Key」并导入。
-                    模型来自已启用且同步成功的账号；同一 URL 重复导入可刷新模型列表。
+                    「注册表 URL」。本机连接无需密钥；局域网连接需点击「密钥」复制并填入「API
+                    Key」。 模型来自已启用且同步成功的账号；同一 URL 重复导入可刷新模型列表。
                   </p>
                   <p>
-                    Kimi CLI：复制「Kimi 配置」，合并到 ~/.kimi/config.toml，将顶层 default_model
-                    设为 kimi-helper，或运行 <code>kimi --model kimi-helper</code>
-                    。保留已有的其他设置。
-                  </p>
-                  <p>
-                    Claude Code：在终端中执行复制的「Claude
-                    配置」，然后启动客户端。其他客户端使用上方地址与网关密钥；Anthropic Base URL
-                    去掉末尾 /v1。Kimi 默认模型为 kimi-for-coding；使用 DeepSeek
+                    本机客户端无需密钥（客户端要求填写时可填任意占位值），局域网客户端使用上方地址与网关密钥；Anthropic
+                    Base URL 去掉末尾 /v1。Kimi 默认模型为 kimi-for-coding；使用 DeepSeek
                     时请将客户端模型改为同步列表中的 DeepSeek 模型。
                   </p>
                 </details>
@@ -1516,7 +1590,8 @@ export function GatewayPanel({
             )}
           </div>
           <p className="workspace-note">
-            仅监听本机 · OpenAI / Anthropic 兼容 · 关闭窗口后 macOS 仍可保持网关运行，退出应用时停止
+            {snapshot.settings.lanSharing ? '局域网共享已开启' : '仅监听本机'} · OpenAI / Anthropic
+            兼容 · 关闭窗口后 macOS 仍可保持网关运行，退出应用时停止
           </p>
         </section>
       )}
@@ -1541,6 +1616,43 @@ export function GatewayPanel({
             setSettingsEdit(undefined)
           }}
         />
+      )}
+      {rotatingKey && (
+        <Modal
+          title="轮换网关密钥？"
+          close={() => {
+            if (!busy) setRotatingKey(false)
+          }}
+        >
+          <p>网关密钥在重启后保持不变，仅在手动轮换时更新。</p>
+          <p>
+            确认后将生成并保存新密钥，旧密钥立即无法发起新请求。局域网客户端需要更新密钥，本机连接无需密钥，已在处理的请求不受影响。
+          </p>
+          <div className="modal-actions">
+            <button className="button" disabled={busy} onClick={() => setRotatingKey(false)}>
+              取消
+            </button>
+            <button
+              className="button destructive"
+              disabled={busy}
+              onClick={() =>
+                void action(
+                  () => api.rotateGatewayKey(group.id),
+                  '密钥已轮换，请点击「密钥」复制新密钥并更新客户端。'
+                ).then((ok) => {
+                  if (ok) setRotatingKey(false)
+                })
+              }
+            >
+              {busy ? '正在轮换…' : '确认轮换'}
+            </button>
+          </div>
+          {error && (
+            <p className="danger" role="alert">
+              {error}
+            </p>
+          )}
+        </Modal>
       )}
       {deleting && (
         <Modal title="删除账号" close={() => setDeleting(undefined)}>
@@ -1600,10 +1712,12 @@ function AccountEditor({
     }
     setDraft((d) => ({
       ...d,
-      ...(key === 'provider' ? { secret: '', modelProtocols: {} } : {}),
+      ...(key === 'provider' ? { secret: '', modelProtocols: {}, excludedModels: [] } : {}),
       [key]: value
     }))
   }
+  const visibleModels =
+    capabilities?.models.filter((model) => !draft.excludedModels?.includes(model)) ?? []
   async function inspect() {
     const version = ++probeVersion.current
     setReading(true)
@@ -1767,6 +1881,15 @@ function AccountEditor({
           <section className="model-protocols">
             <div className="model-protocols-heading">
               <strong>可用模型</strong>
+              {!!draft.excludedModels?.length && (
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => change('excludedModels', [])}
+                >
+                  恢复已删除模型（{draft.excludedModels.length}）
+                </button>
+              )}
               {!!Object.keys(draft.modelProtocols ?? {}).length && (
                 <button
                   className="text-button"
@@ -1780,12 +1903,13 @@ function AccountEditor({
             <p className="model-protocols-hint">
               勾选模型在此账号上原生支持的
               API，至少选择一项。优先同协议调用，其他入口自动转换；刷新不会覆盖选择。
+              删除仅作用于此账号，保存后生效，上游同步不会恢复已删除模型。
             </p>
             {reading ? (
               <p className="muted" role="status">
                 正在获取…
               </p>
-            ) : capabilities?.models.length ? (
+            ) : visibleModels.length ? (
               <div className="model-protocol-list">
                 <table aria-label="可用模型">
                   <thead>
@@ -1796,10 +1920,11 @@ function AccountEditor({
                           {p.label}
                         </th>
                       ))}
+                      <th scope="col">操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {capabilities.models.map((model) => {
+                    {visibleModels.map((model) => {
                       const selected = supportedModelProtocols(draft, model)
                       return (
                         <tr key={model}>
@@ -1824,6 +1949,19 @@ function AccountEditor({
                               />
                             </td>
                           ))}
+                          <td>
+                            <button
+                              type="button"
+                              className="icon-button danger"
+                              aria-label={`删除模型 ${model}`}
+                              title={`删除模型 ${model}`}
+                              onClick={() =>
+                                change('excludedModels', [...(draft.excludedModels ?? []), model])
+                              }
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
                         </tr>
                       )
                     })}
@@ -1832,7 +1970,11 @@ function AccountEditor({
               </div>
             ) : (
               <p className="muted">
-                {capabilities ? '上游暂无可用模型' : '填写 API Key 后自动获取'}
+                {capabilities
+                  ? draft.excludedModels?.length
+                    ? '暂无可用模型，可恢复已删除模型'
+                    : '上游暂无可用模型'
+                  : '填写 API Key 后自动获取'}
               </p>
             )}
           </section>
@@ -1892,9 +2034,10 @@ function SettingsEditor({
   const [draft, setDraft] = useState(input),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false)
+  const [confirmLanSharing, setConfirmLanSharing] = useState(false)
   async function submit(e: FormEvent) {
     e.preventDefault()
-    if (busy) return
+    if (busy || confirmLanSharing) return
     setBusy(true)
     setError('')
     try {
@@ -1914,7 +2057,7 @@ function SettingsEditor({
             hint={
               running
                 ? '更改端口前请先停止网关。'
-                : '网关只监听 127.0.0.1，网关密钥用于客户端认证。'
+                : '默认仅本机可用；开启局域网共享后，同一网络的设备也可使用网关密钥接入。'
             }
           >
             <input
@@ -1925,6 +2068,24 @@ function SettingsEditor({
               disabled={running}
               value={draft.port}
               onChange={(e) => setDraft({ ...draft, port: e.target.valueAsNumber })}
+            />
+          </Field>
+          <Field
+            label="局域网共享"
+            hint={
+              running
+                ? '切换共享前请先停止网关，保存后重新启动。'
+                : '保留本机地址，并增加局域网地址；其他设备需要网关密钥才能访问。'
+            }
+          >
+            <input
+              type="checkbox"
+              disabled={running}
+              checked={draft.lanSharing ?? false}
+              onChange={(e) => {
+                if (e.target.checked) setConfirmLanSharing(true)
+                else setDraft({ ...draft, lanSharing: false })
+              }}
             />
           </Field>
           <div className="form-grid">
@@ -1998,6 +2159,28 @@ function SettingsEditor({
           </button>
         </div>
       </form>
+      {confirmLanSharing && (
+        <Modal title="开启局域网共享？" close={() => setConfirmLanSharing(false)}>
+          <p>
+            开启局域网共享后，同一网络内的其他设备可通过网关密钥使用你的账号。共享使用可能触发部分厂商的风控措施，是否确认开启？
+          </p>
+          <div className="modal-actions">
+            <button className="button" type="button" onClick={() => setConfirmLanSharing(false)}>
+              取消
+            </button>
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => {
+                setDraft((value) => ({ ...value, lanSharing: true }))
+                setConfirmLanSharing(false)
+              }}
+            >
+              确认开启
+            </button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   )
 }

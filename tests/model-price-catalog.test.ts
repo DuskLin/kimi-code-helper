@@ -302,7 +302,7 @@ test('metadata survives restart and upgrades a fresh v2 price cache immediately'
     assert.deepEqual(restored.snapshot(), catalog.snapshot())
     await restored.refresh()
     assert.equal(calls, 1)
-    assert.equal(JSON.parse(await readFile(file, 'utf8')).version, 3)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).version, 4)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

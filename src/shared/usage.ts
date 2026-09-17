@@ -122,16 +122,18 @@ export function parseUsage(value: unknown, protocol: UsageProtocol): Partial<Tok
 }
 
 export function formatUsageCost(totals: Pick<UsageTotals, 'cost' | 'costAmounts'>): string {
-  if (totals.costAmounts)
-    return totals.costAmounts.length
-      ? totals.costAmounts
+  if (totals.costAmounts) {
+    const amounts = totals.costAmounts.filter((amount) => amount.value !== 0)
+    return amounts.length
+      ? amounts
           .map(
             (p) =>
-              `${p.currency} ${p.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+              `${p.currency} ${p.value > 0 && p.value < 0.000001 ? '<0.000001' : p.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
           )
           .join(' + ')
-      : '0.00'
-  return totals.cost == null ? '未知' : `USD ${totals.cost.toFixed(4)}`
+      : '—'
+  }
+  return totals.cost == null ? '未知' : totals.cost === 0 ? '—' : `USD ${totals.cost.toFixed(4)}`
 }
 
 export function summarizeActivity(

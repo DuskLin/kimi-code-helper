@@ -35,8 +35,10 @@ export interface HelperApi {
   saveModelPrice(input: ModelPrice): Promise<GatewaySnapshot>
   saveGateway(input: GatewaySettings): Promise<GatewaySnapshot>
   setGatewayRunning(running: boolean): Promise<GatewaySnapshot>
+  rotateGatewayKey(groupId: string): Promise<GatewaySnapshot>
   copyConnection(input: {
     groupId: string
+    lanAddress?: string
     format: 'url' | 'key' | 'kimi' | 'anthropic' | 'registry'
   }): Promise<void>
 }
@@ -63,6 +65,7 @@ export interface AccountInput {
   enabled: boolean
   concurrencyOverride?: number | null
   modelProtocols?: Record<string, ModelProtocol[]>
+  excludedModels?: string[]
   memberships: Membership[]
   secret?: string
 }
@@ -142,6 +145,8 @@ export interface GroupView extends GroupInput {
   id: string
 }
 export interface GatewaySettings {
+  flowIdleMinutes?: number
+  lanSharing?: boolean
   stickySeconds?: number
   port: number
   autoStart: boolean
@@ -190,11 +195,19 @@ export interface ModelPrice {
 export interface DefaultModelPrice extends ModelPrice {
   tiered: boolean
 }
+export interface RegistryModelCapabilities {
+  reasoning?: boolean
+  tool_call?: boolean
+  support_efforts?: string[]
+  default_effort?: string
+  modalities?: { input?: string[]; output?: string[] }
+}
 export interface CatalogPrice extends Omit<DefaultModelPrice, 'provider'> {
   provider: string
   name: string
   providerName: string
   limit?: { context?: number; output?: number }
+  capabilities?: RegistryModelCapabilities
 }
 export interface ModelPriceCatalogSnapshot {
   entries: CatalogPrice[]
@@ -203,6 +216,8 @@ export interface ModelPriceCatalogSnapshot {
   error: string
 }
 export interface GatewaySnapshot {
+  liveFlows?: import('./live-flow').LiveFlow[]
+  lanBaseUrls: string[]
   quotaCardOrder: string[]
   modelPriceCatalog: ModelPriceCatalogSnapshot
   modelPrices: ModelPrice[]
@@ -247,5 +262,6 @@ export const IPC = {
   modelPriceSave: 'model-price:save',
   gatewaySave: 'gateway:save',
   gatewayRunning: 'gateway:running',
-  connectionCopy: 'connection:copy'
+  connectionCopy: 'connection:copy',
+  connectionRotate: 'connection:rotate'
 } as const

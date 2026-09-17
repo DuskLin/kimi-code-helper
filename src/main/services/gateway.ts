@@ -1,6 +1,9 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
+import { LiveFlowTracker } from './live-flow'
+import { harnessById } from '../../shared/live-flow'
+import { lanAddresses, isPrivateIPv4 } from './lan-addresses'
 import { pipeline } from 'node:stream/promises'
 import {
   upstreamUrl,
@@ -97,9 +100,21 @@ async function bodyOf(req: IncomingMessage): Promise<Buffer> {
 export class Gateway {
   readonly pricing: ModelPriceCatalog
   readonly scheduler = new Scheduler()
+  readonly liveFlows: LiveFlowTracker
   private readonly capabilities: KimiCapabilities
   private server?: Server
   private controllers = new Set<AbortController>()
+  private activityListeners = new Set<(count: number) => void>()
+  onActiveRequestsChange(listener: (count: number) => void): () => void {
+    this.activityListeners.add(listener)
+    listener(this.controllers.size)
+    return () => {
+      this.activityListeners.delete(listener)
+    }
+  }
+  private notifyActivity(): void {
+    for (const listener of this.activityListeners) listener(this.controllers.size)
+  }
   private activeRequests = new Set<Promise<void>>()
   private transitions: Promise<unknown> = Promise.resolve()
   private error = ''
@@ -113,6 +128,10 @@ export class Gateway {
     metadataRequest: typeof fetch = request,
     catalogRequest: typeof fetch = fetch
   ) {
+    this.liveFlows = new LiveFlowTracker(
+      Date.now,
+      () => (this.store.get().settings.flowIdleMinutes ?? 5) * 60000
+    )
     this.pricing = new ModelPriceCatalog(store.priceCachePath, catalogRequest)
     this.capabilities = new KimiCapabilities(metadataRequest)
     this.history = new RequestHistory(store.historyPath)
@@ -122,6 +141,7 @@ export class Gateway {
     const data = this.store.get()
     const snapshot: GatewaySnapshot = {
       activeRequestCount: this.controllers.size,
+      liveFlows: this.liveFlows.snapshot(),
       settings: data.settings,
       modelPrices: data.modelPrices,
       quotaCardOrder: data.quotaCardOrder,
@@ -134,6 +154,9 @@ export class Gateway {
       })),
       running: this.server?.listening ?? false,
       baseUrl: `http://127.0.0.1:${data.settings.port}`,
+      lanBaseUrls: data.settings.lanSharing
+        ? lanAddresses().map((address) => `http://${address}:${data.settings.port}`)
+        : [],
       error: this.error,
       requests: [...this.requests]
     }
@@ -212,7 +235,8 @@ export class Gateway {
     try {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject)
-        server.listen(this.store.get().settings.port, '127.0.0.1', () => {
+        const settings = this.store.get().settings
+        server.listen(settings.port, settings.lanSharing ? '0.0.0.0' : '127.0.0.1', () => {
           server.off('error', reject)
           resolve()
         })
@@ -253,6 +277,11 @@ export class Gateway {
     return this.exclusive(async () => {
       if (this.server?.listening && settings.port !== this.store.get().settings.port)
         throw new Error('请先停止网关再更换端口')
+      if (
+        this.server?.listening &&
+        !!settings.lanSharing !== !!this.store.get().settings.lanSharing
+      )
+        throw new Error('请先停止网关再切换局域网共享')
       await this.store.mutate((data) => {
         data.settings = settings
       })
@@ -327,7 +356,13 @@ export class Gateway {
           : capabilities
       Object.assign(
         account,
-        capabilityFields(account.region, refreshed, account.concurrencyOverride, account.provider)
+        capabilityFields(
+          account.region,
+          refreshed,
+          account.concurrencyOverride,
+          account.provider,
+          account.excludedModels
+        )
       )
     })
     return this.snapshot()
@@ -358,13 +393,31 @@ export class Gateway {
       }
     }
   }
+  async rotateKey(value: unknown): Promise<GatewaySnapshot> {
+    const id = string(value, '分组 ID')
+    return this.exclusive(async () => {
+      if (!this.store.get().settings.lanSharing) throw new Error('请先开启局域网共享')
+      await this.store.mutate((data) => {
+        const group = data.groups.find((item) => item.id === id)
+        if (!group) throw new Error('分组不存在')
+        group.key = randomBytes(32).toString('hex')
+      })
+      return this.snapshot()
+    })
+  }
   connection(value: unknown): string {
     const input = object(value)
     const id = string(input.groupId, '分组 ID')
     const data = this.store.get()
     const group = data.groups.find((g) => g.id === id)
     if (!group) throw new Error('分组不存在')
-    const url = `http://127.0.0.1:${data.settings.port}`
+    let address = '127.0.0.1'
+    if (input.lanAddress !== undefined) {
+      if (!data.settings.lanSharing || !lanAddresses().includes(input.lanAddress as string))
+        throw new Error('局域网地址已不可用，请刷新后重试')
+      address = input.lanAddress as string
+    }
+    const url = `http://${address}:${data.settings.port}`
     switch (input.format) {
       case 'url':
         return `${url}/v1`
@@ -381,6 +434,7 @@ export class Gateway {
     }
   }
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let flowId: string | undefined
     const started = Date.now()
     const startedTick = performance.now()
     let firstTokenMs: number | null = null
@@ -422,11 +476,15 @@ export class Gateway {
       if (!req.complete) req.destroy()
     }, settings.timeoutSeconds * 1000)
     this.controllers.add(controller)
+    this.notifyActivity()
     try {
       if (req.headers.origin) throw new HttpError(403, '本地网关不接受网页跨域请求')
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-      const match = url.pathname.match(/^\/groups\/([^/]+)(\/v1\/.*)$/)
-      const route = match ? match[2] : url.pathname
+      const harnessPath = url.pathname.match(/^\/harness\/([^/]+)(\/.*)$/)
+      if (harnessPath && !harnessById(harnessPath[1])) throw new HttpError(404, 'Harness 不支持')
+      const pathname = harnessPath ? harnessPath[2] : url.pathname
+      const match = pathname.match(/^\/groups\/([^/]+)(\/v1\/.*)$/)
+      const route = match ? match[2] : pathname
       if (!routes.has(route)) throw new HttpError(404, '接口不存在')
       isRegistry = route === '/api.json'
       const isModels = route === '/v1/models' || isRegistry
@@ -446,7 +504,14 @@ export class Gateway {
           ? req.headers['x-api-key']
           : ''
       const data = this.store.get()
-      const group = data.groups.find((g) => matchesKey(key, g.key) && (!match || g.id === match[1]))
+      // 使用实际连接两端地址，不能通过 Host 或转发头伪造本机连接。
+      const loopback = (address: string | undefined) =>
+        address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+      const local = loopback(req.socket.localAddress) && loopback(req.socket.remoteAddress)
+      const group =
+        local && (!match || match[1] === 'default')
+          ? data.groups.find((g) => g.id === 'default')
+          : data.groups.find((g) => matchesKey(key, g.key) && (!match || g.id === match[1]))
       if (!group) throw new HttpError(401, '分组密钥无效或与接入地址不匹配')
       groupName = '统一账号池'
       if (!group.enabled) throw new HttpError(403, '该分组已停用')
@@ -469,7 +534,7 @@ export class Gateway {
                     id: 'kimi-code-helper',
                     name: 'Kimi Code Helper',
                     type: 'openai',
-                    api: `http://127.0.0.1:${settings.port}/v1`,
+                    api: `http://${settings.lanSharing && isPrivateIPv4(req.socket.localAddress ?? '') ? req.socket.localAddress : '127.0.0.1'}:${settings.port}${harnessPath ? `/harness/${harnessPath[1]}` : ''}/v1`,
                     models: registryModels(
                       accounts,
                       this.pricing.snapshot().entries,
@@ -521,6 +586,13 @@ export class Gateway {
       if (!session) session = goSession
       // 无会话字段时仅为本次请求生成，重试复用；不将所有客户端绑定到同一会话。
       goSession ||= randomUUID()
+      if (protocol)
+        flowId = this.liveFlows.start(
+          req.headers,
+          historySession ?? session,
+          model,
+          harnessPath?.[1]
+        )
       const excluded = new Set<string>()
       while (attempts < settings.maxAttempts && !controller.signal.aborted) {
         // 每次尝试读取最新配置，禁用、删除和分组变更立即影响后续调度。
@@ -544,6 +616,7 @@ export class Gateway {
         accountId = account.id
         provider = account.provider ?? 'kimi'
         attempts++
+        if (flowId) this.liveFlows.update(flowId, { state: 'waiting' })
         const attemptStarted = Date.now()
         const attemptStartedTick = performance.now()
         try {
@@ -584,6 +657,7 @@ export class Gateway {
               headers.delete('anthropic-beta')
             }
           }
+          if (flowId && requestBody) this.liveFlows.upload(flowId, requestBody.length)
           const upstream = await this.request(
             `${upstreamUrl(account.region, account.provider, targetRoute)}${url.search}`,
             {
@@ -666,6 +740,13 @@ export class Gateway {
             let streamComplete = false
             let streamInspectable = true
             if (upstream.ok && streaming) streamStartedAt = attemptStartedTick
+            const flows = this.liveFlows
+            const activity = new Transform({
+              transform(chunk, _encoding, callback) {
+                if (flowId && upstream.ok) flows.activity(flowId, chunk.length)
+                callback(null, chunk)
+              }
+            })
             const ids = new ResponseIdsObserver(
               streaming,
               (id) => {
@@ -685,6 +766,7 @@ export class Gateway {
                   ...usage,
                   ...reported
                 }
+                if (flowId && upstream.ok) this.liveFlows.update(flowId, { usage })
               },
               (state) => {
                 if (!upstream.ok) return
@@ -716,11 +798,14 @@ export class Gateway {
                 const observer = new FirstTokenObserver(() => {
                   firstTokenMs ??= Math.round(performance.now() - startedTick)
                 })
-                await pipeline(source, ids, convert, observer, res, { signal: controller.signal })
+                await pipeline(source, activity, ids, convert, observer, res, {
+                  signal: controller.signal
+                })
               } else {
                 // Do not commit HTTP 200 before a buffered conversion has actually succeeded.
                 const result = await pipeline(
                   source,
+                  activity,
                   ids,
                   convert,
                   async (chunks: AsyncIterable<Buffer>) => {
@@ -743,8 +828,8 @@ export class Gateway {
               const observer = new FirstTokenObserver(() => {
                 firstTokenMs ??= Math.round(performance.now() - startedTick)
               })
-              await pipeline(source, ids, observer, res, { signal: controller.signal })
-            } else await pipeline(source, ids, res, { signal: controller.signal })
+              await pipeline(source, activity, ids, observer, res, { signal: controller.signal })
+            } else await pipeline(source, activity, ids, res, { signal: controller.signal })
             if (upstream.ok && streaming && streamInspectable && !streamComplete)
               interruption ??= 'upstream_disconnect'
           } else {
@@ -802,8 +887,15 @@ export class Gateway {
       )
     } finally {
       if (controller.signal.aborted && !interruption) interruption = 'gateway_shutdown'
+      if (flowId)
+        this.liveFlows.finish(
+          flowId,
+          !interruption && !disconnected && finalStatus >= 200 && finalStatus < 300,
+          usage
+        )
       clearTimeout(timer)
       this.controllers.delete(controller)
+      this.notifyActivity()
       req.off('aborted', disconnect)
       res.off('close', disconnect)
       if (!req.complete) req.resume()
