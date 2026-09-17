@@ -21,7 +21,7 @@
 
 ## Features
 
-Kimi Code Helper combines provider accounts into a local pool and gives coding assistants a single HTTP gateway on `127.0.0.1`. Clients use a gateway key; the app selects an available account, forwards requests, and records usage.
+Kimi Code Helper combines provider accounts into a local pool and gives coding assistants a single HTTP gateway on `127.0.0.1`. Loopback clients do not need a key; LAN clients use a gateway key. The app selects an available account, forwards requests, and records usage.
 
 | Feature                | What it does                                                                                                                     |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -30,12 +30,32 @@ Kimi Code Helper combines provider accounts into a local pool and gives coding a
 | Three client protocols | OpenAI Responses, Chat Completions, and Anthropic Messages, with passthrough or conversion based on model protocol settings      |
 | Usage and performance  | Token trends, cache hit rates, activity heatmaps, time to first token, generation speed, and peak/off-peak performance           |
 | Cost estimates         | Prefer upstream-reported costs; otherwise estimate from model prices, with price configuration and subscription quota valuation  |
+| Live gateway topology  | Harness → session → model nodes, directional upload/download connections, and model token usage |
+| Session retention      | Aggregate calls per session, stable node ordering, and a 5/10/15/30/60-minute idle-retention slider |
+| Client and model logos | Recognize supported Harness clients and display model-family brand icons |
+| LAN sharing            | Optional LAN listening, address copying, and gateway-key rotation |
+| Model registry         | Kimi Code import with known context limits, reasoning efforts, and input/output capabilities |
+| Background operation   | Keep the gateway running in the tray after closing the window; animate the tray icon during requests |
 | Desktop controls       | Light and dark themes, card visibility settings, and reorderable account cards                                                   |
 | Local storage          | Encrypt configuration with system secure storage; persist request summaries in SQLite without storing prompts or response bodies |
 
 ## Screenshots
 
 The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Kimi Code Helper” (Quit Kimi Code Helper) to stop the gateway and exit; macOS also supports ⌘Q.
+
+### Live gateway dashboard
+
+Switch between **额度** (Quotas) and **调度** (Live flow) in the title bar. This looping SVG was converted from an actual screen recording:
+
+![Live dashboard showing bidirectional traffic between clients, sessions, and models](docs/images/live-flow-demo.svg)
+
+- **Live topology:** real gateway requests form Harness → session → model branches. Main-agent, subagent, and concurrent calls sharing a session use one node; this is not a count of internal agents. Model IDs and input/output token usage update with requests.
+- **Directional connections:** cyan flows right for uploads; purple flows left for responses. Animation reflects recent transfer events while node backgrounds stay static. Token counts use reported usage; missing values show “—”.
+- **Idle retention:** after all requests finish, the Bot turns gray with an offline icon. Choose 5, 10, 15, 30, or 60 minutes using the toolbar slider; releasing it saves automatically. New calls reactivate the node; expired nodes disappear.
+- **Stable, responsive layout:** first-seen node ordering survives old-request cleanup. Nodes scale within size limits, with vertical scrolling for large graphs. The dashboard fills the content area and supports light and dark themes.
+- **Client identification:** includes Zcode, Kimi Code (CLI, desktop, VS Code), Claude Code, Codex, Qoder, WorkBuddy, Pi, DeepSeek Harness, and Cline, with Harness and model-family logos. Explicit attribution takes priority over UA matching. Generic UAs may need a [dedicated client URL](docs/harness-identification.md).
+
+The dashboard prefers explicit session IDs, falling back to available gateway session/cache identifiers. Requests without an identifier remain separate. The recording above is user-provided; the static screenshots below use smoke-test fixtures.
 
 ### Dark overview
 
