@@ -15,6 +15,7 @@ import {
   searchCatalogPrices,
   resolveModelPrice
 } from '../src/shared/model-pricing'
+import { registryModels } from '../src/main/services/model-registry'
 import type { ModelPrice } from '../src/shared/contracts'
 
 const payload = {
@@ -216,4 +217,93 @@ test('catalog search ignores punctuation and preserves provider identity; saved 
     ),
     undefined
   )
+})
+
+test('registry metadata preserves names and limits without prices, respects mappings and shared limits', () => {
+  const entries = parseCatalogEntries({
+    'kimi-for-coding': {
+      models: {
+        k3: { name: 'Kimi K3', limit: { context: 1048576, output: 131072 } },
+        'k3-256k': { name: 'Kimi K3-256K', limit: { context: 262144, output: 131072 } },
+        invalid: { name: 'Invalid', limit: { context: -1, output: '123' } }
+      }
+    },
+    'opencode-go': {
+      models: { k3: { name: 'Kimi K3', limit: { context: 262144, output: 32768 } } }
+    },
+    unrelated: { models: { unknown: { name: 'Wrong provider', limit: { context: 999999 } } } }
+  })
+  assert.equal(entries.length, 5)
+  assert.equal(entries.find((entry) => entry.model === 'invalid')?.limit, undefined)
+  const accounts = [
+    { provider: 'kimi' as const, models: ['k3', 'k3-256k', 'alias', 'unknown', 'kimi-for-coding'] }
+  ]
+  const prices: ModelPrice[] = [
+    {
+      provider: 'kimi',
+      model: 'alias',
+      currency: 'USD',
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      catalogMatch: { provider: 'kimi-for-coding', model: 'k3' }
+    }
+  ]
+  const models = registryModels(accounts, entries, prices)
+  assert.deepEqual(models.k3, {
+    id: 'k3',
+    name: 'Kimi K3',
+    limit: { context: 1048576, output: 131072 }
+  })
+  assert.equal(models['k3-256k'].limit?.context, 262144)
+  assert.equal(models.alias.name, 'Kimi K3')
+  assert.equal(models.alias.id, 'alias')
+  assert.equal(models.alias.limit?.context, 1048576)
+  assert.deepEqual(models.unknown, { id: 'unknown', name: 'Unknown' })
+  assert.equal(models['kimi-for-coding'].name, 'Kimi for Coding')
+  const shared = registryModels(
+    [...accounts, { provider: 'opencode-go', models: ['k3'] }],
+    entries,
+    prices
+  )
+  assert.deepEqual(shared.k3.limit, { context: 262144, output: 32768 })
+})
+
+test('metadata survives restart and upgrades a fresh v2 price cache immediately', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'catalog-metadata-'))
+  const file = join(dir, 'prices.json')
+  const now = 1000000000000
+  const data = {
+    'kimi-for-coding': {
+      models: {
+        k3: { name: 'Kimi K3', limit: { context: 1048576, output: 131072 }, cost: { input: 1 } }
+      }
+    }
+  }
+  let calls = 0
+  const request: typeof fetch = async () => {
+    calls++
+    return Response.json(data)
+  }
+  try {
+    await writeFile(
+      file,
+      JSON.stringify({ version: 2, updatedAt: now, entries: parseCatalogEntries(payload) })
+    )
+    const catalog = new ModelPriceCatalog(file, request, () => now)
+    await catalog.load()
+    assert.equal(catalog.snapshot().prices.length, 3)
+    await catalog.refresh()
+    assert.equal(calls, 1)
+    assert.deepEqual(catalog.snapshot().entries[0].limit, { context: 1048576, output: 131072 })
+    const restored = new ModelPriceCatalog(file, request, () => now)
+    await restored.load()
+    assert.deepEqual(restored.snapshot(), catalog.snapshot())
+    await restored.refresh()
+    assert.equal(calls, 1)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).version, 3)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

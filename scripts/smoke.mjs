@@ -26,7 +26,11 @@ const upstream = createServer((req, res) => {
       JSON.stringify({
         'kimi-for-coding': {
           models: {
-            'kimi-for-coding': { cost: { input: 1, output: 3, cache_read: 0.2 } },
+            'kimi-for-coding': {
+              name: 'Kimi For Coding',
+              limit: { context: 1048576, output: 32768 },
+              cost: { input: 1, output: 3, cache_read: 0.2 }
+            },
             k3: { cost: { input: 2, output: 6, cache_read: 0.4, tiers: [{ input: 4 }] } }
           }
         }
@@ -401,6 +405,21 @@ try {
     await page.getByText('已复制到剪贴板', { exact: true }).waitFor()
     groupKey = await application.evaluate(({ clipboard }) => clipboard.readText())
     assert.match(groupKey, /^[a-f0-9]{64}$/)
+    await page.getByRole('button', { name: '复制 api.json 链接', exact: true }).click()
+    await page.waitForTimeout(100)
+    assert.equal(
+      await application.evaluate(({ clipboard }) => clipboard.readText()),
+      `http://127.0.0.1:${gatewayPort}/api.json`
+    )
+    const registryResponse = await fetch(`http://127.0.0.1:${gatewayPort}/api.json`, {
+      headers: { authorization: `Bearer ${groupKey}` }
+    })
+    assert.equal(registryResponse.status, 200)
+    const registry = (await registryResponse.json())['kimi-code-helper']
+    assert.equal(registry.type, 'openai')
+    assert.equal(registry.api, `http://127.0.0.1:${gatewayPort}/v1`)
+    assert.equal(registry.models['kimi-for-coding'].name, 'Kimi For Coding')
+    assert.deepEqual(registry.models['kimi-for-coding'].limit, { context: 1048576, output: 32768 })
     await page.getByRole('button', { name: '复制 URL', exact: true }).click()
     await page.waitForFunction(
       () => document.querySelector('.statusbar-copy .lucide-check') !== null

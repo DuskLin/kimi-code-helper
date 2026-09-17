@@ -37,7 +37,7 @@ export interface HelperApi {
   setGatewayRunning(running: boolean): Promise<GatewaySnapshot>
   copyConnection(input: {
     groupId: string
-    format: 'url' | 'key' | 'kimi' | 'anthropic'
+    format: 'url' | 'key' | 'kimi' | 'anthropic' | 'registry'
   }): Promise<void>
 }
 
@@ -194,6 +194,7 @@ export interface CatalogPrice extends Omit<DefaultModelPrice, 'provider'> {
   provider: string
   name: string
   providerName: string
+  limit?: { context?: number; output?: number }
 }
 export interface ModelPriceCatalogSnapshot {
   entries: CatalogPrice[]

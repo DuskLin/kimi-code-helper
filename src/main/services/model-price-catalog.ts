@@ -11,7 +11,7 @@ import { object, validateModelPrice } from './gateway-store'
 
 export const MODEL_PRICE_API = 'https://models.dev/api.json'
 export const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000
-const providers: Record<Provider, string> = {
+export const catalogProviders: Record<Provider, string> = {
   kimi: 'kimi-for-coding',
   deepseek: 'deepseek',
   'opencode-go': 'opencode-go'
@@ -20,6 +20,17 @@ const amount = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000
     ? value
     : null
+
+function modelLimit(value: unknown): CatalogPrice['limit'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const node = object(value)
+  const limit: NonNullable<CatalogPrice['limit']> = {}
+  for (const key of ['context', 'output'] as const) {
+    const size = node[key]
+    if (typeof size === 'number' && Number.isSafeInteger(size) && size > 0) limit[key] = size
+  }
+  return Object.keys(limit).length ? limit : undefined
+}
 
 export function parseCatalogEntries(value: unknown): CatalogPrice[] {
   const root = object(value)
@@ -47,12 +58,16 @@ export function parseCatalogEntries(value: unknown): CatalogPrice[] {
       )
         continue
       const node = object(raw)
-      if (!node.cost || typeof node.cost !== 'object' || Array.isArray(node.cost)) continue
-      const cost = object(node.cost)
+      const cost =
+        node.cost && typeof node.cost === 'object' && !Array.isArray(node.cost)
+          ? object(node.cost)
+          : {}
+      const limit = modelLimit(node.limit)
       const price: CatalogPrice = {
         provider,
         model,
         currency: 'USD',
+        ...(limit ? { limit } : {}),
         name: typeof node.name === 'string' ? node.name.slice(0, 200) : model,
         providerName: typeof source.name === 'string' ? source.name.slice(0, 200) : provider,
         input: amount(cost.input),
@@ -61,17 +76,18 @@ export function parseCatalogEntries(value: unknown): CatalogPrice[] {
         cacheWrite: amount(cost.cache_write),
         tiered: (Array.isArray(cost.tiers) && cost.tiers.length > 0) || !!cost.context_over_200k
       }
-      if (PRICE_FIELDS.some((field) => price[field] !== null)) entries.push(price)
+      if (PRICE_FIELDS.some((field) => price[field] !== null) || limit || node.name)
+        entries.push(price)
     }
   }
   if (!entries.length || entries.length > 50000) throw new Error('价格目录无有效数据')
   return entries
 }
 function defaultPrices(entries: CatalogPrice[]): DefaultModelPrice[] {
-  return Object.entries(providers).flatMap(([provider, id]) =>
+  return Object.entries(catalogProviders).flatMap(([provider, id]) =>
     entries
       .filter((p) => p.provider === id)
-      .map(({ name: _name, providerName: _providerName, ...p }) => ({
+      .map(({ name: _name, providerName: _providerName, limit: _limit, ...p }) => ({
         ...p,
         provider: provider as Provider
       }))
@@ -85,6 +101,7 @@ export class ModelPriceCatalog {
   private state: ModelPriceCatalogSnapshot = { prices: [], entries: [], updatedAt: null, error: '' }
   private pending?: Promise<void>
   private retryAt = 0
+  private needsMetadataRefresh = false
   constructor(
     private readonly file: string,
     private readonly request: typeof fetch = fetch,
@@ -99,7 +116,7 @@ export class ModelPriceCatalog {
       if (raw.length > 20_000_000) throw new Error('cache too large')
       const data = object(JSON.parse(raw))
       if (
-        data.version !== 2 ||
+        (data.version !== 2 && data.version !== 3) ||
         !Number.isSafeInteger(data.updatedAt) ||
         (data.updatedAt as number) <= 0 ||
         (data.updatedAt as number) > this.now() ||
@@ -126,6 +143,7 @@ export class ModelPriceCatalog {
           provider: node.provider,
           name: node.name.slice(0, 200),
           providerName: node.providerName.slice(0, 200),
+          ...(modelLimit(node.limit) ? { limit: modelLimit(node.limit) } : {}),
           tiered: node.tiered
         }
       })
@@ -133,6 +151,7 @@ export class ModelPriceCatalog {
         new Set(entries.map((p) => JSON.stringify([p.provider, p.model]))).size !== entries.length
       )
         throw new Error('duplicate prices')
+      this.needsMetadataRefresh = data.version === 2
       this.state = {
         prices: defaultPrices(entries),
         entries,
@@ -149,7 +168,9 @@ export class ModelPriceCatalog {
     if (
       !force &&
       (this.now() < this.retryAt ||
-        (this.state.updatedAt !== null && this.now() - this.state.updatedAt < PRICE_CACHE_TTL))
+        (!this.needsMetadataRefresh &&
+          this.state.updatedAt !== null &&
+          this.now() - this.state.updatedAt < PRICE_CACHE_TTL))
     )
       return Promise.resolve()
     this.pending = this.fetchAndSave().finally(() => {
@@ -190,12 +211,13 @@ export class ModelPriceCatalog {
       const prices = defaultPrices(entries)
       const updatedAt = this.now()
       await mkdir(dirname(this.file), { recursive: true })
-      await writeFile(`${this.file}.tmp`, JSON.stringify({ version: 2, entries, updatedAt }), {
+      await writeFile(`${this.file}.tmp`, JSON.stringify({ version: 3, entries, updatedAt }), {
         mode: 0o600
       })
       await rename(`${this.file}.tmp`, this.file)
       this.state = { prices, entries, updatedAt, error: '' }
       this.retryAt = 0
+      this.needsMetadataRefresh = false
     } catch {
       this.retryAt = this.now() + 5 * 60 * 1000
       this.state.error = this.state.updatedAt

@@ -917,7 +917,7 @@ export function GatewayPanel({
     memberships: [{ groupId: group.id, priority: 0, weight: 1 }],
     secret: ''
   })
-  const copy = (format: 'url' | 'key' | 'kimi' | 'anthropic') =>
+  const copy = (format: 'url' | 'key' | 'kimi' | 'anthropic' | 'registry') =>
     void action(() => api.copyConnection({ groupId: group.id, format }), '已复制到剪贴板')
   const order = new Map(cardDrag.order.map((id, index) => [id, index]))
   const linkedAccounts = snapshot.accounts
@@ -1190,6 +1190,10 @@ export function GatewayPanel({
                     <button className="text-button" onClick={() => copy('key')}>
                       复制密钥
                     </button>
+                    <button className="text-button" onClick={() => copy('registry')}>
+                      <Copy size={13} />
+                      复制 api.json 链接
+                    </button>
                     <button className="text-button" onClick={() => copy('kimi')}>
                       Kimi 配置
                     </button>
@@ -1200,6 +1204,11 @@ export function GatewayPanel({
                 </div>
                 <details className="connection-help">
                   <summary>如何接入客户端</summary>
+                  <p>
+                    Kimi Code：启动网关，复制「api.json 链接」，在「添加供应商 → 注册表」中粘贴到
+                    「注册表 URL」，再将「复制密钥」得到的网关密钥填入「API Key」并导入。
+                    模型来自已启用且同步成功的账号；同一 URL 重复导入可刷新模型列表。
+                  </p>
                   <p>
                     Kimi CLI：复制「Kimi 配置」，合并到 ~/.kimi/config.toml，将顶层 default_model
                     设为 kimi-helper，或运行 <code>kimi --model kimi-helper</code>

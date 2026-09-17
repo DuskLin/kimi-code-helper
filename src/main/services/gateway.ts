@@ -19,6 +19,7 @@ import {
   validateGateway
 } from './gateway-store'
 import { ModelPriceCatalog } from './model-price-catalog'
+import { registryModels } from './model-registry'
 import { KimiCapabilities } from './kimi-capabilities'
 import { Scheduler } from './scheduler'
 import { FirstTokenObserver } from './first-token'
@@ -52,7 +53,8 @@ const routes = new Set([
   '/v1/chat/completions',
   '/v1/messages',
   '/v1/messages/count_tokens',
-  '/v1/models'
+  '/v1/models',
+  '/api.json'
 ])
 const retryable = (status: number): boolean =>
   [401, 403, 408, 429].includes(status) || status >= 500
@@ -108,9 +110,10 @@ export class Gateway {
   constructor(
     readonly store: GatewayStore,
     private readonly request: typeof fetch = fetch,
-    metadataRequest: typeof fetch = request
+    metadataRequest: typeof fetch = request,
+    catalogRequest: typeof fetch = fetch
   ) {
-    this.pricing = new ModelPriceCatalog(store.priceCachePath)
+    this.pricing = new ModelPriceCatalog(store.priceCachePath, catalogRequest)
     this.capabilities = new KimiCapabilities(metadataRequest)
     this.history = new RequestHistory(store.historyPath)
     this.requests = this.history.page().records
@@ -365,6 +368,8 @@ export class Gateway {
     switch (input.format) {
       case 'url':
         return `${url}/v1`
+      case 'registry':
+        return `${url}/api.json`
       case 'key':
         return group.key
       case 'kimi':
@@ -399,6 +404,7 @@ export class Gateway {
       accountName = '',
       model = ''
     let finalStatus = 500
+    let isRegistry = false
     const disconnect = (): void => {
       if (!res.writableFinished && !controller.signal.aborted && !upstreamStreamFailed) {
         disconnected = true
@@ -422,7 +428,8 @@ export class Gateway {
       const match = url.pathname.match(/^\/groups\/([^/]+)(\/v1\/.*)$/)
       const route = match ? match[2] : url.pathname
       if (!routes.has(route)) throw new HttpError(404, '接口不存在')
-      const isModels = route === '/v1/models'
+      isRegistry = route === '/api.json'
+      const isModels = route === '/v1/models' || isRegistry
       protocol =
         route === '/v1/responses'
           ? 'responses'
@@ -444,20 +451,34 @@ export class Gateway {
       groupName = '统一账号池'
       if (!group.enabled) throw new HttpError(403, '该分组已停用')
       if (isModels) {
-        const models = [
-          ...new Set(
-            data.accounts
-              .filter(
-                (account) =>
-                  account.enabled && account.credential.accessToken && account.capabilities
-              )
-              .flatMap((account) => account.models)
-          )
-        ]
+        if (isRegistry) await this.pricing.refresh()
+        const accounts = data.accounts.filter(
+          (account) => account.enabled && account.credential.accessToken && account.capabilities
+        )
+        const models = [...new Set(accounts.flatMap((account) => account.models))]
         finalStatus = 200
-        res.writeHead(200, { 'content-type': 'application/json' })
+        res.writeHead(200, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store'
+        })
         res.end(
-          JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model' })) })
+          JSON.stringify(
+            isRegistry
+              ? {
+                  'kimi-code-helper': {
+                    id: 'kimi-code-helper',
+                    name: 'Kimi Code Helper',
+                    type: 'openai',
+                    api: `http://127.0.0.1:${settings.port}/v1`,
+                    models: registryModels(
+                      accounts,
+                      this.pricing.snapshot().entries,
+                      data.modelPrices
+                    )
+                  }
+                }
+              : { object: 'list', data: models.map((id) => ({ id, object: 'model' })) }
+          )
         )
         return
       }
@@ -786,7 +807,7 @@ export class Gateway {
       req.off('aborted', disconnect)
       res.off('close', disconnect)
       if (!req.complete) req.resume()
-      {
+      if (!isRegistry) {
         const record: RequestRecord = {
           id: randomUUID(),
           time: started,

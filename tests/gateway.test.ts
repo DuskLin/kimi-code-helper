@@ -240,6 +240,85 @@ test('DeepSeek metadata uses isolated cache, official models and balance endpoin
   assert.deepEqual((await capabilities.get('mainland-cn', 'same-key')).models, ['kimi-for-coding'])
 })
 
+test('api.json exports a live authenticated Kimi Code registry without secrets', async () => {
+  const f = await storeFixture()
+  const gateway = new Gateway(
+    f.store,
+    undefined,
+    async () => Response.json({ data: [{ id: 'kimi-for-coding' }, { id: 'custom-model' }] }),
+    async () =>
+      Response.json({
+        'kimi-for-coding': {
+          models: {
+            'kimi-for-coding': {
+              name: 'Kimi For Coding',
+              limit: { context: 1048576, output: 32768 }
+            }
+          }
+        }
+      })
+  )
+  const reserved = await listen((_req, res) => res.end())
+  await reserved.close()
+  try {
+    await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+    await gateway.setRunning(true)
+    const group = f.store.get().groups[0]
+    const url = gateway.connection({ groupId: group.id, format: 'registry' })
+    assert.equal(url, `${reserved.url}/api.json`)
+    const headers = { authorization: `Bearer ${group.key}` }
+    assert.equal((await fetch(url)).status, 401)
+    assert.equal((await fetch(url, { headers: { authorization: 'Bearer wrong' } })).status, 401)
+    assert.equal((await fetch(url, { method: 'POST', headers })).status, 405)
+    assert.equal(
+      (await fetch(url, { headers: { ...headers, origin: 'https://example.com' } })).status,
+      403
+    )
+    const empty = await (await fetch(url, { headers })).json()
+    assert.deepEqual(empty['kimi-code-helper'].models, {})
+    await gateway.saveAccount(accountInput('a'))
+    await gateway.saveAccount(accountInput('b'))
+    const requestsBefore = gateway.snapshot().requests.length
+    const response = await fetch(url, { headers: { ...headers, host: 'untrusted.example' } })
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    const body = await response.text()
+    assert.equal(gateway.snapshot().requests.length, requestsBefore)
+    assert.ok(!body.includes(group.key))
+    assert.ok(!body.includes('secret-a'))
+    assert.deepEqual(JSON.parse(body), {
+      'kimi-code-helper': {
+        id: 'kimi-code-helper',
+        name: 'Kimi Code Helper',
+        type: 'openai',
+        api: `${reserved.url}/v1`,
+        models: {
+          'kimi-for-coding': {
+            id: 'kimi-for-coding',
+            name: 'Kimi For Coding',
+            limit: { context: 1048576, output: 32768 }
+          },
+          'custom-model': { id: 'custom-model', name: 'Custom Model' }
+        }
+      }
+    })
+    await f.store.mutate((data) => {
+      data.accounts[0].enabled = false
+      data.accounts[1].models = ['updated-model']
+    })
+    const updated = await (await fetch(url, { headers })).json()
+    assert.deepEqual(Object.keys(updated['kimi-code-helper'].models), ['updated-model'])
+    await f.store.mutate((data) => {
+      data.groups[0].enabled = false
+    })
+    assert.equal((await fetch(url, { headers })).status, 403)
+  } finally {
+    await gateway.shutdown()
+    gateway.history.close()
+    await f.cleanup()
+  }
+})
+
 test('mixed providers persist, route all protocols, preserve failed balance refresh and reject unavailable balance', async () => {
   const fixture = await storeFixture()
   let available = true
