@@ -916,6 +916,48 @@ h1 {
   background: var(--accent-soft);
   color: var(--accent-text);
 }
+.update-ready {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.update-notice {
+  position: fixed;
+  bottom: 50px;
+  right: 20px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100vw - 40px);
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 30px #0002;
+}
+.update-notice p {
+  margin: 6px 0 0;
+}
+.update-dialog {
+  width: min(440px, calc(100vw - 32px));
+}
+.update-content {
+  padding: 20px;
+}
+.update-content p {
+  line-height: 1.6;
+}
+.update-content progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.update-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+.update-error {
+  color: var(--error-text);
+}
 .app-status i {
   width: 6px;
   height: 6px;

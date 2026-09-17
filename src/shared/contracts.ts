@@ -11,6 +11,10 @@ export interface AppInfo {
 }
 
 export interface HelperApi {
+  getUpdateState(): Promise<import('./updates').UpdateState>
+  checkForUpdates(): Promise<void>
+  installUpdate(): Promise<void>
+  openReleasePage(): Promise<void>
   getUsageStats(query: import('./usage').UsageQuery): Promise<import('./usage').UsageStats>
   getAppInfo(): Promise<AppInfo>
   getSettings(): Promise<AppSettings>
@@ -218,6 +222,10 @@ export interface RequestHistoryPage {
 }
 
 export const IPC = {
+  updateGet: 'update:get',
+  updateCheck: 'update:check',
+  updateInstall: 'update:install',
+  updateOpenRelease: 'update:open-release',
   appInfo: 'app:info',
   settingsGet: 'settings:get',
   settingsSave: 'settings:save',

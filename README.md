@@ -184,6 +184,7 @@ curl http://127.0.0.1:17300/v1/chat/completions \
 | `npm start`            | 运行已构建的应用                          |
 | `npm run test:unit`    | 网关、协议转换、调度、用量等单元测试      |
 | `npm run test:smoke`   | 构建并运行真实 Electron 冒烟测试          |
+| `npm run test:update:mac` | macOS 隔离应用：下载校验、替换、重启与备份（需编译工具） |
 | `npm test`             | 单元测试和冒烟测试                        |
 | `npm run pack`         | 生成当前平台应用目录                      |
 | `npm run dist`         | 生成当前平台安装包到 `dist/`              |
@@ -214,6 +215,14 @@ git push origin v0.1.0
 ```
 
 请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题与说明并更新附件。全部平台构建成功后才上传 Release 附件，Actions 产物保留 14 天。
+
+### App 内升级
+
+安装版启动 10 秒后检查 GitHub 正式版，此后每 6 小时检查一次，也可点击右下角「检查更新」。发现新版会提示并后台下载，下载完成后点击「重启并安装」即可自动安装并重新打开，账号和设置保留。安装前会确认重启，因为这会中断正在处理的网关请求。开发模式不检查更新，预发布版不推送给用户。
+
+macOS 从 GitHub 下载对应架构的 ZIP，校验 SHA-512、应用标识和版本后，在退出时自动替换 App；无需 Apple Developer 证书或上架 App Store。请先将 App 安装到可写目录（通常为 Applications），不要直接从 DMG 运行。替换或启动命令失败时恢复旧版；旧 App 备份保留在安装目录旁的 `.kimi-helper-update-*/previous.app`，确认新版正常后可删除该备份目录。Windows 使用 NSIS 安装器，Linux 需运行可写的 AppImage。
+
+CI 会上传安装包、blockmap 和更新清单，并合并 macOS 两种架构的 `latest-mac.yml`。建议等 Release 草稿的全部附件上传完毕再发布；不要删除 ZIP 或更新清单。第一次需手动安装包含此功能的版本，之后发布更高版本即可在 App 内升级。更新源是公开 GitHub Releases，不在客户端内放置 GitHub Token。
 
 ## 更多文档
 

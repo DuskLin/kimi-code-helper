@@ -159,7 +159,7 @@ electron-builder.yml       # 跨平台打包配置
 
 ## 打包
 
-构建产物在 `out/`，打包产物在 `dist/`。已配置 macOS（DMG / ZIP）、Windows（NSIS）和 Linux（AppImage）目标。通常在对应系统中生成安装包。macOS 使用本地临时签名（ad hoc），发布签名、公证、应用图标和自动更新尚未配置。
+构建产物在 `out/`，打包产物在 `dist/`。已配置 macOS（DMG / ZIP）、Windows（NSIS）和 Linux（AppImage）目标。通常在对应系统中生成安装包。macOS 使用本地临时签名（ad hoc），开发者证书签名、公证和应用图标尚未配置。App 内升级使用 GitHub Releases；macOS 通过校验 ZIP 后替换应用实现无证书更新，Windows / Linux 使用 electron-updater。详见 [App 内升级](../README.md#app-内升级)。
 
 ### 自动打包与发布
 

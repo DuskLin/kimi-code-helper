@@ -215,6 +215,16 @@ git push origin v0.1.0
 
 Choose a new, unpublished version number. Pushing a tag creates a draft Release if needed and uploads assets. Publishing an existing Release preserves its title and notes while updating assets. Release assets are uploaded only after all platform builds succeed; Actions artifacts are retained for 14 days.
 
+Run `npm run test:update:mac` on macOS with compiler tools to verify checksum rejection, staging, replacement, relaunch and backup using an isolated test app. This does not replace your installed application.
+
+### In-app updates
+
+Installed builds check GitHub stable releases 10 seconds after launch and every six hours afterward. Use the bottom-right update button to check manually. New versions download in the background; click **Restart and install** when ready. Restarting interrupts active gateway requests but preserves accounts and settings. Development builds do not check for updates, and prereleases are excluded.
+
+macOS downloads the ZIP for the running architecture, verifies its SHA-512 checksum, bundle ID and version, then replaces the app after exit without requiring an Apple Developer certificate. Install the app in a writable directory first, rather than running from a DMG. Replacement or launch-command failures restore the old app; a backup remains beside the installation in `.kimi-helper-update-*/previous.app`. Remove that backup directory after verifying the new version. Windows uses NSIS; Linux requires a writable AppImage.
+
+CI publishes installers, blockmaps and update manifests, merging both Mac architectures into `latest-mac.yml`. Prefer publishing the draft after all assets have uploaded. Keep ZIP files and update manifests attached. Install the first version containing this feature manually; subsequent higher versions can update in-app. The source is public GitHub Releases; no GitHub token is embedded in the client.
+
 ## Further reading
 
 - [Technical reference](docs/reference.zh-CN.md): synchronization, scheduling scores, metric definitions, configuration migration, and storage details (Chinese).

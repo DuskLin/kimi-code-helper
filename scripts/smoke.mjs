@@ -171,6 +171,39 @@ try {
   assert.deepEqual(preferences, { sandbox: true, contextIsolation: true, nodeIntegration: false })
   await page.screenshot({ path: join(artifacts, 'empty.png') })
 
+  // The real preload exposes update state; developer builds never contact GitHub.
+  const initialUpdate = await page.evaluate(() => window.kimiHelper.getUpdateState())
+  assert.equal(initialUpdate.status, 'disabled')
+  await page.getByRole('button', { name: '应用更新', exact: true }).click()
+  const updateDialog = page.getByRole('dialog', { name: '应用更新' })
+  await updateDialog.getByText('开发模式', { exact: true }).waitFor()
+  assert.equal(
+    await updateDialog.getByRole('button', { name: '检查更新', exact: true }).isDisabled(),
+    true
+  )
+  await updateDialog.getByRole('button', { name: '关闭对话框' }).click()
+  await application.evaluate(({ ipcMain }, state) => {
+    ipcMain.removeHandler('update:get')
+    ipcMain.handle('update:get', () => ({
+      ...state,
+      canInstall: true,
+      reason: '',
+      version: '0.2.0',
+      status: 'downloaded',
+      progress: 100
+    }))
+  }, initialUpdate)
+  await page.getByLabel('新版本更新提示').waitFor()
+  await page.getByRole('button', { name: '查看更新' }).click()
+  await updateDialog.getByRole('button', { name: '重启并安装' }).waitFor()
+  await page.screenshot({ path: join(artifacts, 'update-ready.png') })
+  await updateDialog.getByRole('button', { name: '关闭对话框' }).click()
+  await page.getByRole('button', { name: '收起更新提示' }).click()
+  await application.evaluate(({ ipcMain }, state) => {
+    ipcMain.removeHandler('update:get')
+    ipcMain.handle('update:get', () => state)
+  }, initialUpdate)
+
   // 模拟旧主进程没有新接口：显示可执行的提示，并在接口恢复后清除错误。
   const initialGateway = await page.evaluate(() => window.kimiHelper.getGateway())
   await application.evaluate(({ ipcMain }) => ipcMain.removeHandler('gateway:get'))

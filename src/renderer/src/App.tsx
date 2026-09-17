@@ -3,6 +3,7 @@ import { Check, KeyRound, Link2, Moon, Sun } from 'lucide-react'
 import type { AppInfo, Theme } from '../../shared/contracts'
 import { GatewayPanel, type GatewayStatus } from './GatewayPanel'
 import appLogo from './assets/kimi-code-helper-logo.png'
+import { UpdateControl } from './UpdateControl'
 
 export function App() {
   const [info, setInfo] = useState<AppInfo>()
@@ -150,7 +151,7 @@ export function App() {
             </div>
           )}
         </div>
-        <span>v{info?.version ?? '0.1.0'}</span>
+        <UpdateControl version={info?.version} />
       </footer>
     </div>
   )

@@ -1,0 +1,126 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+          - os: macos-15
+            platform: mac
+            arch: arm64
+          - os: windows-2022
+            platform: win
+            arch: x64
+          - os: ubuntu-22.04
+            platform: linux
+            arch: x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Set package version from tag
+        run: |
+          # npm validates the version; only the runner's working copy is changed.
+          VERSION="${RELEASE_TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a version tag such as v1.2.3 or v1.2.3-beta.1" >&2
+            exit 1
+          fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
+      - run: npm run test:unit
+      - name: Test macOS update installation
+        if: runner.os == 'macOS'
+        run: npm run test:update:mac
+      - name: Build installers
+        run: npm run dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Save installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.blockmap
+            dist/*.yml
+            !dist/builder*.yml
+
+  release:
+    name: Upload release assets
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: build-artifacts
+      - name: Merge and verify update manifests
+        run: node scripts/prepare-release.mjs build-artifacts installers
+      - name: Create draft if needed and upload installers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            OPTIONS=(--draft --verify-tag --title "$RELEASE_TAG" --generate-notes)
+            if [[ "$RELEASE_TAG" == *-* ]]; then
+              OPTIONS+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" "${OPTIONS[@]}"
+          fi
+          # Upload update metadata last, so clients never discover missing installer assets.
+          shopt -s nullglob
+          ASSETS=(installers/*.dmg installers/*.zip installers/*.exe installers/*.AppImage installers/*.blockmap)
+          gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
+          gh release upload "$RELEASE_TAG" installers/*.yml --clobber

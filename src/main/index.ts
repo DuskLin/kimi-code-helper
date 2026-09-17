@@ -6,14 +6,18 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
-  safeStorage
+  safeStorage,
+  shell
 } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IPC } from '../shared/contracts'
 import { SettingsStore } from './services/settings'
 import { GatewayStore, string } from './services/gateway-store'
 import { Gateway } from './services/gateway'
+import { UpdateService } from './services/updates'
+import { UnsignedMacUpdater } from './services/mac-updater'
 
 app.setName('Kimi Code Helper')
 // 自动化验证使用临时目录，避免改变用户设置。
@@ -22,6 +26,7 @@ if (process.env.KIMI_HELPER_TEST_USER_DATA)
 const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 let gateway: Gateway | undefined
+let updates: UpdateService | undefined
 let quitting = false
 app.on('second-instance', () => {
   const window = BrowserWindow.getAllWindows()[0]
@@ -114,6 +119,38 @@ void app
         return callback(value)
       })
     }
+    let canInstall = app.isPackaged
+    let updateReason = app.isPackaged ? '' : '开发模式不检查或安装更新。'
+    if (app.isPackaged && process.platform === 'linux' && !process.env.APPIMAGE) {
+      canInstall = false
+      updateReason = '请运行 AppImage 安装包以使用自动安装。'
+    }
+    const updater = new UpdateService(
+      process.platform === 'darwin' ? new UnsignedMacUpdater() : autoUpdater,
+      { version: app.getVersion(), enabled: app.isPackaged, canInstall, reason: updateReason },
+      async () => {
+        const { response } = await dialog.showMessageBox({
+          type: 'question',
+          title: '重启并安装更新',
+          message: '现在重启并安装新版本？',
+          detail: '网关将暂时停止，正在处理的请求会被中断。账号和设置会保留。',
+          buttons: ['重启安装', '稍后'],
+          defaultId: 1,
+          cancelId: 1
+        })
+        if (response !== 0) throw new Error('已取消安装，可稍后重试。')
+        await service.shutdown()
+      }
+    )
+    updates = updater
+    handle(IPC.updateGet, () => updater.get())
+    handle(IPC.updateCheck, () => {
+      void updater.check()
+    })
+    handle(IPC.updateInstall, () => updater.install())
+    handle(IPC.updateOpenRelease, () =>
+      shell.openExternal('https://github.com/DuskLin/kimi-code-helper/releases/latest')
+    )
     handle(IPC.appInfo, () => ({
       version: app.getVersion(),
       platform: process.platform,
@@ -186,6 +223,7 @@ void app
       ])
     )
     createWindow()
+    updater.start()
     void service.refreshStaleAccounts()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -210,7 +248,10 @@ app.on('before-quit', (event) => {
 })
 
 // before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
-app.on('quit', () => gateway?.history.close())
+app.on('quit', () => {
+  updates?.dispose()
+  gateway?.history.close()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
