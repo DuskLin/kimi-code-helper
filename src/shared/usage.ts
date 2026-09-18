@@ -39,6 +39,7 @@ export interface ActivitySummary {
   longestStreak: number
 }
 export interface UsageStats {
+  accountTotals?: { accountId: string; requests: number; totalTokens: number | null }[]
   activity?: ActivitySummary
   byAccount: {
     day?: string

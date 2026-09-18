@@ -11,6 +11,15 @@ export interface AppInfo {
 }
 
 export interface HelperApi {
+  getDashboard(): Promise<import('./dashboard').DashboardState>
+  saveDashboard(
+    input: import('./dashboard').DashboardSettings & { token?: string }
+  ): Promise<import('./dashboard').DashboardState>
+  rotateDashboardCode(): Promise<import('./dashboard').DashboardState>
+  copyDashboardCode(): Promise<void>
+  copyDashboardUrl(): Promise<void>
+  checkDashboardPublic(): Promise<import('./dashboard').DashboardState>
+  openDashboard(): Promise<void>
   getUpdateState(): Promise<import('./updates').UpdateState>
   checkForUpdates(): Promise<void>
   installUpdate(): Promise<void>
@@ -238,6 +247,13 @@ export interface RequestHistoryPage {
 }
 
 export const IPC = {
+  dashboardGet: 'dashboard:get',
+  dashboardSave: 'dashboard:save',
+  dashboardRotate: 'dashboard:rotate',
+  dashboardCopyCode: 'dashboard:copy-code',
+  dashboardCopyUrl: 'dashboard:copy-url',
+  dashboardCheckPublic: 'dashboard:check-public',
+  dashboardOpen: 'dashboard:open',
   updateGet: 'update:get',
   updateCheck: 'update:check',
   updateInstall: 'update:install',

@@ -2,6 +2,8 @@ node_modules/
 out/
 dist/
 artifacts/
+build/cloudflared/
+build/cloudflared-bundle/
 *.log
 .DS_Store
 .env

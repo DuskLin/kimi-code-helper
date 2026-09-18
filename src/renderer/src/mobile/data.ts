@@ -1,16 +1,8 @@
 import type { AccountBalance, AccountQuota, QuotaWindow } from '../../../shared/contracts'
 
 export type Provider = 'Kimi' | 'DeepSeek' | 'Go'
-export interface DashboardAccount {
-  id: string
-  name: string
-  provider: Provider
-  quota: AccountQuota | null
-  balance?: AccountBalance
-  requests: number
-  tokens: number
-  active: number
-}
+export type { DashboardAccount } from '../../../shared/dashboard'
+import type { DashboardAccount } from '../../../shared/dashboard'
 
 const started = Date.now()
 function window(remaining: number, hours: number): QuotaWindow {

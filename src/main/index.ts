@@ -7,6 +7,7 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  net,
   safeStorage,
   shell
 } from 'electron'
@@ -21,16 +22,18 @@ import { UsageService } from './services/usage-service'
 import { UpdateService } from './services/updates'
 import { UnsignedMacUpdater } from './services/mac-updater'
 import { createTray } from './tray'
+import { DashboardServer } from './services/dashboard-server'
+import { dashboardSource } from './services/dashboard-source'
 
 app.setName('Navo')
-// Preserve existing accounts, settings and the single-instance lock across the rename.
-app.setPath('userData', join(app.getPath('appData'), 'Kimi Code Helper'))
+app.setPath('userData', join(app.getPath('appData'), 'Navo'))
 // 自动化验证使用临时目录，避免改变用户设置。
 if (process.env.KIMI_HELPER_TEST_USER_DATA)
   app.setPath('userData', process.env.KIMI_HELPER_TEST_USER_DATA)
 const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 let gateway: Gateway | undefined
+let dashboard: DashboardServer | undefined
 let usageService: UsageService | undefined
 let updates: UpdateService | undefined
 let quitting = false
@@ -127,6 +130,37 @@ void app
     const service = new Gateway(gatewayStore)
     const statistics = new UsageService(gatewayStore.historyPath)
     usageService = statistics
+    dashboard = new DashboardServer({
+      file: join(app.getPath('userData'), 'dashboard.json'),
+      assets: join(__dirname, '../mobile'),
+      binary: app.isPackaged
+        ? join(
+            process.resourcesPath,
+            'cloudflared',
+            process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared'
+          )
+        : join(
+            __dirname,
+            '../../build/cloudflared',
+            `${process.platform}-${process.arch}`,
+            process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared'
+          ),
+      codec: {
+        encrypt: (value) => {
+          if (
+            !safeStorage.isEncryptionAvailable() ||
+            (process.platform === 'linux' &&
+              safeStorage.getSelectedStorageBackend() === 'basic_text')
+          )
+            throw new Error('系统安全存储不可用')
+          return safeStorage.encryptString(value).toString('base64')
+        },
+        decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64'))
+      },
+      source: dashboardSource(service, statistics),
+      publicRequest: (input, init) => net.fetch(input instanceof URL ? input.href : input, init)
+    })
+    await dashboard.load()
     await service.pricing.load()
     gateway = service
     const handle = (channel: string, callback: (value: unknown) => unknown): void => {
@@ -185,6 +219,17 @@ void app
       return saved
     })
     handle(IPC.gatewayGet, () => service.snapshot())
+    handle(IPC.dashboardGet, () => dashboard!.state())
+    handle(IPC.dashboardSave, (value) => dashboard!.save(value))
+    handle(IPC.dashboardRotate, () => dashboard!.rotate())
+    handle(IPC.dashboardCopyCode, () => clipboard.writeText(dashboard!.accessCode()))
+    handle(IPC.dashboardCopyUrl, () => {
+      const url = dashboard!.state().publicUrl
+      if (!url) throw new Error('公网链接尚未生成')
+      clipboard.writeText(url)
+    })
+    handle(IPC.dashboardCheckPublic, () => dashboard!.checkPublic())
+    handle(IPC.dashboardOpen, () => shell.openExternal(dashboard!.state().localUrl))
     handle(IPC.requestHistory, (before) => service.history.page(before as number | undefined))
     handle(IPC.quotaCycles, (query) => service.history.getQuotaCycles(query))
     handle(IPC.quotaCycleExclude, (input) => {
@@ -270,13 +315,14 @@ app.on('before-quit', (event) => {
   quitting = true
   if (!gateway) return
   event.preventDefault()
-  void gateway.shutdown().finally(() => {
+  void Promise.allSettled([gateway.shutdown(), dashboard?.close()]).finally(() => {
     app.quit()
   })
 })
 
 // before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
 app.on('quit', () => {
+  dashboard?.tunnel.terminate()
   void usageService?.close()
   tray?.destroy()
   updates?.dispose()

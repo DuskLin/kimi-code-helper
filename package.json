@@ -7,12 +7,12 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "npm run prepare:tunnel && vite build --config vite.mobile.config.ts && node scripts/dev.mjs",
     "dev:mobile": "vite --config vite.mobile.config.ts --open /mobile.html",
     "build:mobile": "npm run typecheck && vite build --config vite.mobile.config.ts",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "npm run typecheck && electron-vite build && vite build --config vite.mobile.config.ts",
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "tsc -p tsconfig.test.json && node --test artifacts/tests/tests/*.test.js",
     "test:smoke": "npm run build && node scripts/smoke.mjs && node scripts/tray-smoke.mjs",
@@ -20,13 +20,15 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "prepare:tunnel": "node scripts/prepare-cloudflared.cjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "selfsigned": "^5.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",

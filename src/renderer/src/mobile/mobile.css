@@ -1716,3 +1716,43 @@ h2 {
     scroll-behavior: auto !important;
   }
 }
+
+.login-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.login-panel {
+  width: min(400px, 100%);
+  display: grid;
+  gap: 18px;
+}
+.login-panel > img {
+  width: 44px;
+  height: 44px;
+}
+.login-panel h1 {
+  font-size: 24px;
+}
+.login-panel p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.login-panel label {
+  font-size: 13px;
+}
+.login-panel input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 12px;
+  font: inherit;
+}
+.login-panel button {
+  min-height: 46px;
+}

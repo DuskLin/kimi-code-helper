@@ -3,6 +3,13 @@ import { IPC, type HelperApi } from '../shared/contracts'
 
 // 仅暴露白名单业务方法，不允许渲染进程任意调用 IPC。
 const api: HelperApi = {
+  getDashboard: () => ipcRenderer.invoke(IPC.dashboardGet),
+  saveDashboard: (input) => ipcRenderer.invoke(IPC.dashboardSave, input),
+  rotateDashboardCode: () => ipcRenderer.invoke(IPC.dashboardRotate),
+  copyDashboardCode: () => ipcRenderer.invoke(IPC.dashboardCopyCode),
+  copyDashboardUrl: () => ipcRenderer.invoke(IPC.dashboardCopyUrl),
+  checkDashboardPublic: () => ipcRenderer.invoke(IPC.dashboardCheckPublic),
+  openDashboard: () => ipcRenderer.invoke(IPC.dashboardOpen),
   getUpdateState: () => ipcRenderer.invoke(IPC.updateGet),
   checkForUpdates: () => ipcRenderer.invoke(IPC.updateCheck),
   installUpdate: () => ipcRenderer.invoke(IPC.updateInstall),

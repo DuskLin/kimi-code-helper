@@ -1,3 +1,4 @@
+import { Modal } from './Modal'
 import {
   cloneElement,
   isValidElement,
@@ -9,6 +10,7 @@ import {
   type ReactElement,
   type ReactNode
 } from 'react'
+import { DashboardSettings } from './DashboardSettings'
 import { createPortal } from 'react-dom'
 import {
   CircleHelp,
@@ -57,7 +59,6 @@ import type { QuotaCostCycle, QuotaCycleQuery } from '../../shared/quota-cost'
 import { remainingRatio } from '../../shared/kimi-quota'
 import { MODEL_PROTOCOLS, supportedModelProtocols } from '../../shared/model-protocols'
 
-import { OverlayScrollArea } from './OverlayScrollArea'
 import { KimiLogo } from './KimiLogo'
 import deepseekLogo from './assets/deepseek.svg'
 import { LiveFlowPanel } from './LiveFlowPanel'
@@ -726,40 +727,6 @@ function QuotaCycleManager({
     </Modal>
   )
 }
-function Modal({
-  title,
-  close,
-  children
-}: {
-  title: string
-  close: () => void
-  children: ReactNode
-}) {
-  const ref = useRef<HTMLDialogElement>(null)
-  useEffect(() => {
-    ref.current?.showModal()
-  }, [])
-  return (
-    <dialog
-      ref={ref}
-      className="modal"
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        close()
-      }}
-    >
-      <div className="modal-heading">
-        <h2>{title}</h2>
-        <button type="button" className="icon-button" aria-label="关闭对话框" onClick={close}>
-          <X size={18} />
-        </button>
-      </div>
-      <OverlayScrollArea label={`${title}内容`}>{children}</OverlayScrollArea>
-    </dialog>
-  )
-}
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   const hintId = useId()
   return (
@@ -1002,6 +969,7 @@ export function GatewayPanel({
               <Settings2 size={15} />
               网关设置
             </button>
+            <DashboardSettings />
             <span
               className={`gateway-toggle ${stopBlocked ? 'is-in-use' : ''}`}
               title={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}

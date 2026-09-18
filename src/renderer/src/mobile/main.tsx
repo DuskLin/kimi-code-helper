@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   Activity,
@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import type { QuotaWindow } from '../../../shared/contracts'
 import {
-  accounts,
+  accounts as demoAccounts,
   countdown,
   formatTokens,
   percent,
@@ -38,6 +38,7 @@ import kimi from '../assets/kimi.svg'
 import deepseek from '../assets/deepseek.svg'
 import go from '../assets/models/opencode.svg'
 import './mobile.css'
+import type { DashboardSnapshot } from '../../../shared/dashboard'
 
 type Page = 'quota' | 'usage' | 'status'
 const tabs = [
@@ -45,8 +46,7 @@ const tabs = [
   { id: 'usage', name: '用量', icon: BarChart3 },
   { id: 'status', name: '状态', icon: Activity }
 ] as const
-const sum = (key: 'requests' | 'tokens' | 'active') =>
-  accounts.reduce((value, account) => value + account[key], 0)
+
 const time = (value: number) => new Date(value).toLocaleTimeString('zh-CN', { hour12: false })
 
 function Badge({ low = false, children }: { low?: boolean; children: React.ReactNode }) {
@@ -101,10 +101,19 @@ function Meter({
     </div>
   )
 }
-function Chart({ multiplier = 1 }: { multiplier?: number }) {
-  const values = [
+function Chart({
+  multiplier = 1,
+  points
+}: {
+  multiplier?: number
+  points?: DashboardSnapshot['points']
+}) {
+  const sampleValues = [
     20, 26, 22, 31, 27, 37, 34, 50, 60, 73, 64, 86, 92, 78, 82, 63, 57, 48, 54, 43, 35, 40, 29, 24
   ]
+  const values = points
+    ? points.map((p) => ((p.tokens ?? 0) / Math.max(1, ...points.map((v) => v.tokens ?? 0))) * 92)
+    : sampleValues
   const [selected, setSelected] = useState<number | null>(null)
   const heights = values.map((value) => 125 - value)
   const slopes = heights.slice(1).map((y, i) => (y - heights[i]) / 20)
@@ -130,7 +139,7 @@ function Chart({ multiplier = 1 }: { multiplier?: number }) {
         <span>
           {selected === null
             ? '近 24 小时'
-            : `${23 - selected} 小时前 · ${Math.round(values[selected] * 820 * multiplier).toLocaleString()} Token`}
+            : `${23 - selected} 小时前 · ${Math.round(points ? (points[selected]?.tokens ?? 0) : values[selected] * 820 * multiplier).toLocaleString()} Token`}
         </span>
       </div>
       <div className="chart-plot">
@@ -138,7 +147,7 @@ function Chart({ multiplier = 1 }: { multiplier?: number }) {
           viewBox="0 0 460 150"
           preserveAspectRatio="none"
           role="img"
-          aria-label="示例：近 24 小时 Token 用量趋势"
+          aria-label={points ? '近 24 小时 Token 用量趋势' : '示例：近 24 小时 Token 用量趋势'}
         >
           <defs>
             <linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1">
@@ -201,11 +210,33 @@ function Chart({ multiplier = 1 }: { multiplier?: number }) {
     </div>
   )
 }
-function App() {
+function App({
+  snapshot,
+  reload,
+  logout,
+  connectionError = false
+}: {
+  snapshot?: DashboardSnapshot
+  reload?: () => Promise<void>
+  logout?: () => void
+  connectionError?: boolean
+}) {
+  const accounts = snapshot?.accounts ?? demoAccounts
+  const sum = (key: 'requests' | 'tokens' | 'active') => accounts.reduce((n, a) => n + a[key], 0)
+  const label = (a: DashboardAccount) =>
+    a.status && a.status !== 'available'
+      ? { disabled: '已停用', error: '认证异常', stale: '数据过期', exhausted: '额度耗尽' }[
+          a.status
+        ]
+      : (percent(a.quota?.fiveHour) ?? 100) < 15
+        ? '额度偏低'
+        : '可用'
+
   const [route, setRoute] = useState(location.hash.slice(1) || 'quota')
   const [filter, setFilter] = useState<Provider | '全部'>('全部')
   const [dark, setDark] = useState(() => localStorage.getItem('navo.mobile.theme') === 'dark')
-  const [connected, setConnected] = useState(true)
+  const [demoConnected, setConnected] = useState(true)
+  const connected = snapshot ? !connectionError : demoConnected
   const [updated, setUpdated] = useState(Date.now())
   const [now, setNow] = useState(Date.now())
   const [refreshing, setRefreshing] = useState(false)
@@ -226,18 +257,25 @@ function App() {
     return () => clearInterval(timer)
   }, [])
   useEffect(() => {
-    if (!connected) return
+    if (snapshot) setUpdated(snapshot.generatedAt)
+  }, [snapshot])
+  useEffect(() => {
+    if (!connected || snapshot) return
     const timer = window.setInterval(() => setUpdated(Date.now()), 30000)
     return () => clearInterval(timer)
-  }, [connected])
+  }, [connected, snapshot])
   useEffect(() => {
     if (!refreshing) return
+    if (reload) {
+      void reload().finally(() => setRefreshing(false))
+      return
+    }
     const timer = window.setTimeout(() => {
       if (connected) setUpdated(Date.now())
       setRefreshing(false)
     }, 550)
     return () => clearTimeout(timer)
-  }, [refreshing, connected])
+  }, [refreshing, connected, reload])
   const account = route.startsWith('account/')
     ? accounts.find((a) => a.id === route.split('/')[1])
     : undefined
@@ -248,8 +286,8 @@ function App() {
     <button
       className={`icon-button ${refreshing ? 'refreshing' : ''}`}
       onClick={() => setRefreshing(true)}
-      disabled={refreshing || !connected}
-      aria-label="刷新示例数据"
+      disabled={refreshing || (!snapshot && !connected)}
+      aria-label={snapshot ? '刷新额度' : '刷新示例数据'}
     >
       <RefreshCw size={19} />
     </button>
@@ -284,7 +322,7 @@ function App() {
         <div className="top-actions">
           <span className="preview-tag">
             <FlaskConical size={13} />
-            交互预览
+            {snapshot ? '只读访问' : '交互预览'}
           </span>
           <button
             className="icon-button theme-toggle"
@@ -313,7 +351,9 @@ function App() {
             )}
             <div className={`sync-status ${stale ? 'stale' : ''}`} role="status">
               <span className="status-dot" />
-              <span>{stale ? '连接中断 · 数据可能已过期' : '示例数据'}</span>
+              <span>
+                {stale ? '连接中断 · 数据可能已过期' : snapshot ? '实时连接' : '示例数据'}
+              </span>
               <span className="sync-time">更新于 {time(updated)}</span>
             </div>
           </div>
@@ -326,29 +366,29 @@ function App() {
           <>
             <div className="detail-identity">
               <Identity account={account} />
-              <Badge low={(percent(account.quota?.fiveHour) ?? 100) < 15}>
-                {(percent(account.quota?.fiveHour) ?? 100) < 15 ? '额度偏低' : '可用'}
-              </Badge>
+              <Badge low={label(account) !== '可用'}>{label(account)}</Badge>
             </div>
             <div className="detail-grid">
               <section className="panel quota-hero">
                 <div className="section-title">
-                  <h2>{account.quota ? '5 小时额度' : '账户余额'}</h2>
-                  <span className="subtle">{account.quota ? '当前窗口' : '按量付费'}</span>
+                  <h2>{account.provider !== 'DeepSeek' ? '5 小时额度' : '账户余额'}</h2>
+                  <span className="subtle">
+                    {account.provider !== 'DeepSeek' ? '当前窗口' : '按量付费'}
+                  </span>
                 </div>
-                {account.quota ? (
+                {account.provider !== 'DeepSeek' ? (
                   <>
                     <div
-                      className={`quota-ring ${(percent(account.quota.fiveHour) ?? 100) < 15 ? 'low' : ''}`}
+                      className={`quota-ring ${(percent(account.quota?.fiveHour) ?? 100) < 15 ? 'low' : ''}`}
                       style={
                         {
-                          '--remaining': `${(percent(account.quota.fiveHour) ?? 0) * 3.6}deg`
+                          '--remaining': `${(percent(account.quota?.fiveHour) ?? 0) * 3.6}deg`
                         } as React.CSSProperties
                       }
                     >
                       <div>
                         <strong>
-                          {percent(account.quota.fiveHour) ?? '—'}
+                          {percent(account.quota?.fiveHour) ?? '—'}
                           <small>%</small>
                         </strong>
                         <span>剩余额度</span>
@@ -358,8 +398,8 @@ function App() {
                       <span>下次重置</span>
                       <div>
                         <strong>
-                          {account.quota.fiveHour?.resetAt
-                            ? new Date(account.quota.fiveHour.resetAt).toLocaleString('zh-CN', {
+                          {account.quota?.fiveHour?.resetAt
+                            ? new Date(account.quota?.fiveHour.resetAt).toLocaleString('zh-CN', {
                                 month: 'numeric',
                                 day: 'numeric',
                                 hour: '2-digit',
@@ -367,14 +407,22 @@ function App() {
                               })
                             : '未知'}
                         </strong>
-                        <p>{countdown(account.quota.fiveHour, now)}</p>
+                        <p>{countdown(account.quota?.fiveHour, now)}</p>
                       </div>
                     </div>
                   </>
                 ) : (
                   <div className="balance-hero">
                     <span>可用余额</span>
-                    <strong>CNY {account.balance?.balances[0].balance.toFixed(2)}</strong>
+                    {account.balance?.balances.length ? (
+                      account.balance.balances.map((balance) => (
+                        <strong key={balance.currency}>
+                          {balance.currency} {balance.balance.toFixed(2)}
+                        </strong>
+                      ))
+                    ) : (
+                      <strong>—</strong>
+                    )}
                     <p>各币种独立展示，不进行汇率换算</p>
                   </div>
                 )}
@@ -403,7 +451,10 @@ function App() {
                     <h2>用量趋势</h2>
                     <BarChart3 size={17} />
                   </div>
-                  <Chart multiplier={account.tokens / sum('tokens')} />
+                  <Chart
+                    points={snapshot?.points}
+                    multiplier={account.tokens / Math.max(1, sum('tokens'))}
+                  />
                 </section>
               </div>
             </div>
@@ -417,7 +468,8 @@ function App() {
                   可用账号
                 </span>
                 <strong>
-                  4 <small>/ 4</small>
+                  {accounts.filter((a) => !a.status || a.status === 'available').length}{' '}
+                  <small>/ {accounts.length}</small>
                 </strong>
               </div>
               <div>
@@ -426,7 +478,7 @@ function App() {
                   进行中请求
                 </span>
                 <strong>
-                  2
+                  {snapshot?.totals.active ?? sum('active')}
                   <span className="live-bars">
                     <i />
                     <i />
@@ -439,7 +491,7 @@ function App() {
                   <BarChart3 size={16} />
                   今日 Token
                 </span>
-                <strong>{formatTokens(sum('tokens'))}</strong>
+                <strong>{formatTokens(snapshot?.totals.tokens ?? sum('tokens'))}</strong>
               </div>
               <div>
                 <span>
@@ -447,7 +499,7 @@ function App() {
                   今日请求
                 </span>
                 <strong>
-                  {sum('requests')}
+                  {snapshot?.totals.requests ?? sum('requests')}
                   <small> 次</small>
                 </strong>
               </div>
@@ -462,13 +514,16 @@ function App() {
                     onClick={() => setFilter(value)}
                   >
                     {value}
-                    {value === '全部' && <span>4</span>}
+                    {value === '全部' && <span>{accounts.length}</span>}
                   </button>
                 ))}
               </div>
               <span className="account-count">{visible.length} 个账号</span>
             </div>
             <div className="account-grid">
+              {!visible.length && (
+                <section className="panel">暂无账号，请在桌面 App 中添加账号。</section>
+              )}
               {visible.map((a) => (
                 <a
                   href={`#account/${a.id}`}
@@ -485,27 +540,26 @@ function App() {
                           {a.active}
                         </span>
                       )}
-                      <Badge low={(percent(a.quota?.fiveHour) ?? 100) < 15}>
-                        {(percent(a.quota?.fiveHour) ?? 100) < 15 ? '额度偏低' : '可用'}
-                      </Badge>
+                      <Badge low={label(a) !== '可用'}>{label(a)}</Badge>
                       <ChevronRight size={17} />
                     </div>
                   </div>
-                  {a.quota ? (
+                  {a.provider !== 'DeepSeek' ? (
                     <div className="quota-columns">
-                      <Meter label="5 小时剩余" value={a.quota.fiveHour} now={now} />
-                      <Meter label="本周剩余" value={a.quota.weekly} now={now} />
-                      {a.quota.monthly && (
+                      <Meter label="5 小时剩余" value={a.quota?.fiveHour} now={now} />
+                      <Meter label="本周剩余" value={a.quota?.weekly} now={now} />
+                      {a.quota?.monthly && (
                         <div className="monthly">
                           <span>本月剩余</span>
-                          <strong>{percent(a.quota.monthly)}%</strong>
-                          <span>{countdown(a.quota.monthly, now)}</span>
+                          <strong>{percent(a.quota?.monthly)}%</strong>
+                          <span>{countdown(a.quota?.monthly, now)}</span>
                         </div>
                       )}
                     </div>
                   ) : (
                     <div className="balance">
                       <span>账户余额</span>
+                      {!a.balance?.balances.length && <strong>—</strong>}
                       {a.balance?.balances.map((b) => (
                         <strong key={b.currency}>
                           <small>{b.currency}</small> {b.balance.toFixed(2)}
@@ -528,7 +582,7 @@ function App() {
                   <ArrowUpRight size={15} />
                 </a>
               </div>
-              <Chart />
+              <Chart points={snapshot?.points} />
             </section>
           </>
         ) : page === 'usage' ? (
@@ -536,7 +590,7 @@ function App() {
             <section className="usage-stats">
               <div className="panel">
                 <span>今日 Token</span>
-                <strong>{formatTokens(sum('tokens'))}</strong>
+                <strong>{formatTokens(snapshot?.totals.tokens ?? sum('tokens'))}</strong>
                 <small>
                   <ArrowUpRight size={14} />
                   所有账号合计
@@ -544,7 +598,7 @@ function App() {
               </div>
               <div className="panel">
                 <span>今日请求</span>
-                <strong>{sum('requests')}</strong>
+                <strong>{snapshot?.totals.requests ?? sum('requests')}</strong>
                 <small>
                   <ArrowDownLeft size={14} />
                   包含已完成和进行中请求
@@ -557,7 +611,7 @@ function App() {
                   <h2>用量趋势</h2>
                   <Badge>近 24 小时</Badge>
                 </div>
-                <Chart />
+                <Chart points={snapshot?.points} />
               </section>
               <section className="panel">
                 <div className="section-title">
@@ -574,7 +628,9 @@ function App() {
                           <strong>{formatTokens(a.tokens)}</strong>
                         </div>
                         <div className="track">
-                          <span style={{ width: `${(a.tokens / sum('tokens')) * 100}%` }} />
+                          <span
+                            style={{ width: `${(a.tokens / Math.max(1, sum('tokens'))) * 100}%` }}
+                          />
                         </div>
                       </a>
                     ))}
@@ -588,10 +644,12 @@ function App() {
               <div className={`connection-icon ${stale ? 'offline' : ''}`}>
                 {connected ? <Wifi size={30} /> : <WifiOff size={30} />}
               </div>
-              <h2>{connected ? '连接演示正常' : '连接已中断'}</h2>
+              <h2>{connected ? (snapshot ? '实时连接正常' : '连接演示正常') : '连接已中断'}</h2>
               <p>
                 {connected
-                  ? '当前使用示例数据，可模拟断线查看页面状态。'
+                  ? snapshot
+                    ? '额度由桌面 App 定期同步，页面自动获取最新数据。'
+                    : '当前使用示例数据，可模拟断线查看页面状态。'
                   : '保留最后一次数据，恢复连接后继续刷新。'}
               </p>
               <div className="connection-path">
@@ -613,11 +671,15 @@ function App() {
               <button
                 className="secondary-button"
                 onClick={() => {
+                  if (snapshot) {
+                    logout?.()
+                    return
+                  }
                   setConnected(!connected)
                   if (!connected) setUpdated(Date.now())
                 }}
               >
-                {connected ? '模拟连接中断' : '恢复演示连接'}
+                {snapshot ? '退出登录' : connected ? '模拟连接中断' : '恢复演示连接'}
               </button>
             </section>
             <section className="panel status-details">
@@ -628,7 +690,7 @@ function App() {
                     <Database size={16} />
                     数据来源
                   </dt>
-                  <dd>本地示例数据</dd>
+                  <dd>{snapshot ? '桌面 App 实时数据' : '本地示例数据'}</dd>
                 </div>
                 <div>
                   <dt>
@@ -649,14 +711,23 @@ function App() {
                     <Cloud size={16} />
                     Cloudflare Tunnel
                   </dt>
-                  <dd>尚未接入</dd>
+                  <dd>
+                    {snapshot
+                      ? {
+                          off: '关闭',
+                          connecting: '连接中',
+                          connected: '已连接',
+                          error: '连接异常'
+                        }[snapshot.tunnel]
+                      : '尚未接入'}
+                  </dd>
                 </div>
                 <div>
                   <dt>
                     <ShieldCheck size={16} />
                     访问方式
                   </dt>
-                  <dd>只读预览</dd>
+                  <dd>{snapshot ? 'HTTPS · 只读访问' : '只读预览'}</dd>
                 </div>
               </dl>
               <div className="status-note">
@@ -668,7 +739,8 @@ function App() {
         )}
         <footer className="page-footer">
           <FlaskConical size={13} />
-          示例数据 · 仅用于体验预览<span>最后更新 {time(updated)}</span>
+          {snapshot ? '实时数据 · 只读访问' : '示例数据 · 仅用于体验预览'}
+          <span>最后更新 {time(updated)}</span>
         </footer>
       </main>
       <nav className="bottom-nav" aria-label="移动端导航">
@@ -678,4 +750,145 @@ function App() {
   )
 }
 
-createRoot(document.getElementById('root')!).render(<App />)
+function LiveApp() {
+  const [snapshot, setSnapshot] = useState<DashboardSnapshot>()
+  const [needLogin, setNeedLogin] = useState(false)
+  const [code, setCode] = useState('')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const active = useRef<AbortController | null>(null)
+  const reload = useCallback(async () => {
+    active.current?.abort()
+    const controller = new AbortController()
+    active.current = controller
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    try {
+      const account = location.hash.startsWith('#account/') ? location.hash.slice(9) : ''
+      const response = await fetch(
+        `/api/snapshot${account ? `?account=${encodeURIComponent(account)}` : ''}`,
+        { credentials: 'same-origin', cache: 'no-store', signal: controller.signal }
+      )
+      if (response.status === 401) {
+        setNeedLogin(true)
+        setSnapshot(undefined)
+        return
+      }
+      if (!response.ok) throw new Error()
+      const data = (await response.json()) as DashboardSnapshot
+      if (active.current !== controller) return
+      setSnapshot(data)
+      setNeedLogin(false)
+      setFailed(false)
+      setMessage('')
+    } catch {
+      if (active.current === controller) {
+        setFailed(true)
+        setMessage('连接暂时不可用，请检查桌面 App 是否正在运行。')
+      }
+    } finally {
+      clearTimeout(timeout)
+    }
+  }, [])
+  useEffect(() => {
+    void reload()
+    const interval = setInterval(() => {
+      if (!document.hidden) void reload()
+    }, 30000)
+    const changed = () => {
+      void reload()
+    }
+    window.addEventListener('hashchange', changed)
+    document.addEventListener('visibilitychange', changed)
+    return () => {
+      active.current?.abort()
+      clearInterval(interval)
+      window.removeEventListener('hashchange', changed)
+      document.removeEventListener('visibilitychange', changed)
+    }
+  }, [reload])
+  async function login(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setMessage('')
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout(15000)
+      })
+      setCode('')
+      if (!response.ok) {
+        setMessage(
+          response.status === 429 ? '尝试过多，请 15 分钟后重试。' : '访问码不正确或已过期。'
+        )
+        return
+      }
+      await reload()
+    } catch {
+      setMessage('无法连接，请稍后重试。')
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function logout() {
+    try {
+      const response = await fetch('/api/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout(15000)
+      })
+      if (!response.ok && response.status !== 401) throw new Error()
+      setSnapshot(undefined)
+      setNeedLogin(true)
+    } catch {
+      setFailed(true)
+    }
+  }
+  if (snapshot && !needLogin)
+    return (
+      <App
+        snapshot={snapshot}
+        reload={reload}
+        logout={() => void logout()}
+        connectionError={failed}
+      />
+    )
+  return (
+    <main className="login-page">
+      <form className="panel login-panel" onSubmit={login}>
+        <img src={logo} alt="Navo" />
+        <h1>{needLogin ? '登录额度仪表盘' : '正在连接'}</h1>
+        <p>只读访问 · 安全查看账号额度</p>
+        {needLogin && (
+          <>
+            <label htmlFor="access-code">访问码</label>
+            <input
+              id="access-code"
+              type="password"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoComplete="current-password"
+              required
+              placeholder="从桌面 App 复制访问码"
+            />
+            <button className="secondary-button" disabled={busy}>
+              {busy ? '正在验证…' : '登录'}
+            </button>
+            <p>在桌面 App「远程仪表盘」中复制访问码。登录有效期为 8 小时。</p>
+          </>
+        )}
+        {message && <p role="alert">{message}</p>}
+        {!needLogin && failed && (
+          <button type="button" className="secondary-button" onClick={() => void reload()}>
+            重新连接
+          </button>
+        )}
+      </form>
+    </main>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(import.meta.env.DEV ? <App /> : <LiveApp />)

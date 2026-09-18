@@ -2205,3 +2205,306 @@ textarea {
     transition: none;
   }
 }
+
+.dashboard-settings-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+.dashboard-settings-modal .modal-heading {
+  padding-bottom: 18px;
+}
+.dashboard-settings-modal .modal-scroll-body {
+  padding-bottom: 20px;
+}
+.dashboard-settings-content {
+  display: grid;
+  gap: 20px;
+}
+.dashboard-section {
+  min-width: 0;
+}
+.dashboard-section + .dashboard-section {
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.dashboard-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.dashboard-section h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.dashboard-status {
+  font-size: 10px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.dashboard-status::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dashboard-status.is-ok {
+  color: #27996b;
+}
+.dashboard-status.is-warning {
+  color: #bf842d;
+}
+.dashboard-toggle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.dashboard-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--background);
+  cursor: pointer;
+}
+.dashboard-toggle-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.dashboard-toggle-row strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.dashboard-toggle-row small {
+  font-size: 10px;
+  color: var(--muted);
+}
+.dashboard-toggle-row input[role='switch'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 18px;
+  min-width: 30px;
+  margin: 0;
+  border-radius: 12px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  position: relative;
+}
+.dashboard-toggle-row input[role='switch']::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px #0002;
+  transition: transform 0.15s;
+}
+.dashboard-toggle-row input[role='switch']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.dashboard-toggle-row input[role='switch']:checked::after {
+  transform: translateX(12px);
+}
+.dashboard-field-grid {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.dashboard-settings-modal .field {
+  margin-bottom: 0;
+  font-size: 11px;
+}
+.dashboard-settings-modal .field > span {
+  color: var(--muted);
+}
+.dashboard-settings-modal .field input,
+.dashboard-settings-modal .field select {
+  width: 100%;
+  min-width: 0;
+  height: 35px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.dashboard-named-fields {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+.dashboard-addresses {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--background);
+  overflow: hidden;
+}
+.dashboard-address-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 41px;
+  padding: 6px 10px;
+}
+.dashboard-address-row + .dashboard-address-row {
+  border-top: 1px solid var(--border);
+}
+.dashboard-address-label,
+.dashboard-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+.dashboard-address-row code {
+  font-family: inherit;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+.dashboard-address-list {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.dashboard-inline-action.button {
+  padding: 4px 7px;
+  min-height: 27px;
+  font-size: 10px;
+  gap: 4px;
+  border-color: transparent;
+  background: transparent;
+  flex-shrink: 0;
+}
+.dashboard-inline-action.button:hover {
+  background: var(--control-background);
+  border-color: var(--border);
+}
+.dashboard-connection-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+}
+.dashboard-disclosure {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 0;
+}
+.dashboard-disclosure summary {
+  cursor: pointer;
+  padding: 6px 0;
+  font-size: 10px;
+}
+.dashboard-disclosure p {
+  margin: 6px 0 10px;
+  font-size: 11px;
+}
+.dashboard-code-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.dashboard-code-row p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.dashboard-code-row > .button {
+  white-space: nowrap;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.dashboard-security-details {
+  margin-top: 6px;
+}
+.dashboard-fingerprint {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  font:
+    10px/1.7 ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  user-select: text;
+}
+.dashboard-reset-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+}
+.dashboard-danger.button {
+  color: var(--error-text);
+  font-size: 11px;
+}
+.dashboard-dialog-footer {
+  border-top: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.dashboard-dialog-footer > div {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dashboard-feedback {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.dashboard-error {
+  color: var(--error-text);
+  background: var(--error-background);
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  margin: 8px 0 0;
+}
+@media (max-width: 650px) {
+  .dashboard-settings-modal {
+    width: calc(100vw - 24px);
+  }
+  .dashboard-toggle-grid {
+    gap: 8px;
+  }
+  .dashboard-toggle-row {
+    padding: 10px;
+  }
+  .dashboard-toggle-row small {
+    font-size: 9px;
+  }
+  .dashboard-field-grid {
+    grid-template-columns: 110px minmax(0, 1fr);
+  }
+  .dashboard-dialog-footer {
+    padding: 12px 20px;
+  }
+}

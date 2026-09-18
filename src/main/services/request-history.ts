@@ -429,6 +429,8 @@ export class RequestHistory {
             row.averageFirstTokenMs == null ? null : Number(row.averageFirstTokenMs),
           firstTokenSamples: Number(row.firstTokenSamples),
           averageTokensPerSecond: summary.averageTokensPerSecond,
+          requests: summary.requests,
+          totalTokens: summary.totalTokens,
           speedSamples: summary.speedSamples
         }
       })
@@ -457,7 +459,14 @@ export class RequestHistory {
       accounts,
       models,
       byModel,
-      byAccount,
+      byAccount: byAccount.map(
+        ({ requests: _requests, totalTokens: _tokens, ...performance }) => performance
+      ),
+      accountTotals: byAccount.map(({ accountId, requests, totalTokens }) => ({
+        accountId,
+        requests,
+        totalTokens
+      })),
       ...(activity ? { activity } : {})
     }
   }
