@@ -18,6 +18,7 @@ const api: HelperApi = {
   installUpdate: () => ipcRenderer.invoke(IPC.updateInstall),
   openReleasePage: () => ipcRenderer.invoke(IPC.updateOpenRelease),
   openIssuesPage: () => ipcRenderer.invoke(IPC.appOpenIssues),
+  openProjectPage: () => ipcRenderer.invoke(IPC.appOpenProject),
   getAppInfo: () => ipcRenderer.invoke(IPC.appInfo),
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   saveSettings: (settings) => ipcRenderer.invoke(IPC.settingsSave, settings),

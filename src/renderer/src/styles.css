@@ -2725,3 +2725,30 @@ textarea {
     margin-bottom: 0;
   }
 }
+
+.star-welcome {
+  width: min(460px, calc(100vw - 32px));
+}
+.star-welcome-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  margin-bottom: 20px;
+}
+.star-welcome h3 {
+  margin: 0 0 12px;
+  font-size: 20px;
+  line-height: 1.5;
+}
+.star-welcome-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.star-welcome .modal-actions {
+  flex-wrap: wrap;
+}

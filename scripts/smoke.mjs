@@ -163,12 +163,19 @@ async function launch() {
     .locator('.app-status')
     .filter({ hasText: /网关运行中|网关已停止/ })
     .waitFor()
-  await page.getByRole('button', { name: '设置', exact: true }).waitFor()
+  await page.getByRole('button', { name: '设置', exact: true, includeHidden: true }).waitFor()
   return page
 }
 
 try {
   let page = await launch()
+  const welcome = page.getByRole('dialog', { name: '欢迎使用 Navo' })
+  await welcome.waitFor()
+  await page.screenshot({ path: join(artifacts, 'star-welcome.png') })
+  await welcome.getByRole('button', { name: '先体验一下' }).click()
+  await page.reload()
+  await page.getByRole('button', { name: '设置', exact: true }).waitFor()
+  assert.equal(await welcome.count(), 0)
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light')
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined')
   const preferences = await application.evaluate(({ BrowserWindow }) => {

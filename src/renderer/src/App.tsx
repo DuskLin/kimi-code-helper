@@ -4,6 +4,7 @@ import type { AppInfo, Theme } from '../../shared/contracts'
 import { GatewayPanel, type GatewayStatus, type GatewayPage } from './GatewayPanel'
 import appLogo from './assets/navo-logo.png'
 import { UpdateControl } from './UpdateControl'
+import { StarWelcome } from './StarWelcome'
 
 // Keep the persisted key so existing Navo display preferences survive the rename.
 const viewStorageKey = 'kimi-helper.main-view'
@@ -166,6 +167,7 @@ export function App() {
           <GatewayPanel onStatusChange={setGatewayStatus} page={page} setPage={changePage} />
         )}
       </main>
+      {ready && <StarWelcome />}
       <footer className="statusbar">
         <div className="statusbar-connection">
           <span className="app-status" role="status" title={gatewayStatus?.error || undefined}>
