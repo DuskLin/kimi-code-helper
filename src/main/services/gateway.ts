@@ -579,11 +579,12 @@ export class Gateway {
         }
         // 只记录明确的强度枚举；不改写请求，也不保存任意客户端文本。
         const effort =
-          route === '/v1/responses'
+          (route === '/v1/responses'
             ? (payload.reasoning as { effort?: unknown } | null)?.effort
             : route === '/v1/chat/completions'
               ? payload.reasoning_effort
-              : (payload.output_config as { effort?: unknown } | null)?.effort
+              : (payload.output_config as { effort?: unknown } | null)?.effort) ??
+          (payload.thinking as { effort?: unknown } | null)?.effort
         if (
           typeof effort === 'string' &&
           ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'auto', 'ultra'].includes(

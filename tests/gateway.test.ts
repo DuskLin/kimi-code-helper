@@ -1411,6 +1411,53 @@ test('Responses、Chat Completions、Messages 原路径、请求体及 JSON/SSE 
   }
 })
 
+test('Kimi thinking.effort 记录、透传和持久化，标准强度优先且不保存任意文本', async () => {
+  const received: string[] = []
+  const f = await gatewayFixture((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => {
+      received.push(Buffer.concat(chunks).toString())
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"choices":[]}')
+    })
+  })
+  try {
+    const cases = [
+      { thinking: { type: 'enabled', effort: 'max' } },
+      { thinking: { type: 'enabled', effort: 'max' }, reasoning_effort: 'low' },
+      { thinking: { type: 'enabled', effort: 'private arbitrary text' } },
+      { thinking: { type: 'enabled' } }
+    ]
+    for (const thinking of cases) {
+      const body = JSON.stringify({
+        model: 'kimi-for-coding',
+        messages: [{ role: 'user', content: 'hello' }],
+        ...thinking
+      })
+      const response = await fetch(`${f.url}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body
+      })
+      assert.equal(response.status, 200)
+      await response.text()
+      assert.equal(received.at(-1), body)
+    }
+    await eventually(() => f.gateway.snapshot().requests.length === cases.length)
+    assert.deepEqual(
+      f.gateway.snapshot().requests.map((r) => r.reasoningEffort),
+      [null, null, 'low', 'max']
+    )
+    await f.gateway.setRunning(false)
+    const restored = new Gateway(f.store)
+    assert.equal(restored.snapshot().requests.at(-1)!.reasoningEffort, 'max')
+    restored.history.close()
+  } finally {
+    await f.cleanup()
+  }
+})
+
 test('429 冷却并切换；400 原样返回且不重试；503 耗尽有界退出', async () => {
   let mode = 'rate',
     calls = 0
