@@ -13,7 +13,7 @@ import {
 } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { isAbsolute, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { isTrustedRendererUrl } from './services/renderer-trust'
 import { IPC } from '../shared/contracts'
 import { SettingsStore } from './services/settings'
 import { GatewayStore, string } from './services/gateway-store'
@@ -66,19 +66,8 @@ nativeAutoUpdater.on('before-quit-for-update', () => {
 })
 const rendererFile = join(__dirname, '../renderer/index.html')
 const developmentUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
-const trustedUrl = developmentUrl
-  ? new URL(developmentUrl).origin
-  : pathToFileURL(rendererFile).href
-
 function isTrusted(url: string): boolean {
-  if (developmentUrl) {
-    try {
-      return new URL(url).origin === trustedUrl
-    } catch {
-      return false
-    }
-  }
-  return url.split('#')[0] === trustedUrl
+  return isTrustedRendererUrl(url, rendererFile, developmentUrl)
 }
 
 function createWindow(): void {
