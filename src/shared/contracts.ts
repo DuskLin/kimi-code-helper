@@ -11,6 +11,17 @@ export interface AppInfo {
 }
 
 export interface HelperApi {
+  onMigrationProgress(
+    listener: (progress: import('./session-migration').MigrationProgress) => void
+  ): () => void
+  chooseMigrationDirectory(currentPath: string): Promise<string | null>
+  scanZcodeSessions(
+    paths?: import('./session-migration').MigrationPaths
+  ): Promise<import('./session-migration').MigrationScan>
+  migrateZcodeSessions(
+    paths: import('./session-migration').MigrationPaths,
+    sessions: Pick<import('./session-migration').MigrationSession, 'key' | 'fingerprint'>[]
+  ): Promise<import('./session-migration').MigrationResult>
   getKimiDesktop(): Promise<import('./kimi-desktop').KimiDesktopState>
   saveKimiDesktop(
     value: import('./kimi-desktop').KimiDesktopPreferences
@@ -254,6 +265,10 @@ export interface RequestHistoryPage {
 }
 
 export const IPC = {
+  migrationChooseDirectory: 'migration:choose-directory',
+  migrationProgress: 'migration:progress',
+  zcodeScan: 'zcode:scan',
+  zcodeMigrate: 'zcode:migrate',
   kimiDesktopGet: 'kimi-desktop:get',
   kimiDesktopSave: 'kimi-desktop:save',
   kimiDesktopReapply: 'kimi-desktop:reapply',

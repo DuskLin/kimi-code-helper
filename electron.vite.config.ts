@@ -8,6 +8,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('src/main/index.ts'),
+          'session-migration-worker': resolve('src/main/services/session-migration-worker.ts'),
           'request-history-worker': resolve('src/main/services/request-history-worker.ts')
         },
         output: { entryFileNames: '[name].js' }

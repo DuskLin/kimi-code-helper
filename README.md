@@ -318,3 +318,21 @@ CI 会上传安装包、blockmap 和更新清单，并合并 macOS 两种架构�
 PR 会构建全部平台但不发布；版本发布必须等所有平台检查通过。Windows CI 静默安装最终 NSIS EXE，再启动安装目录中的应用；Linux CI 在 Ubuntu 22.04 的 Xvfb、D-Bus、GNOME Keyring 环境中通过 FUSE 启动最终 AppImage。`npm run test:installed` 检查真实窗口和 preload、系统加密存储、账号保存及重启恢复、网关 HTTP 转发、SQLite 历史、仪表盘资源和内置 cloudflared 的可执行性。上游使用本地测试服务，不需要真实 API Key。失败会阻止上传 Release 附件，诊断记录见 Actions 的 `installation-check-*` 附件。
 
 支持范围：Windows x64、具备 FUSE 2 和已解锁 Secret Service / KWallet 的 Linux x64 桌面。AppImage 下载后需赋予执行权限；Ubuntu 22.04 可安装 `libfuse2 gnome-keyring`。无密钥环的精简 Linux 环境不能保存账号。Kimi Code 桌面额度集成仍仅支持 macOS。CI 不涵盖所有发行版、真实供应商账号、公网 Tunnel 连通性、Windows 签名信誉提示或 Windows/Linux 自动更新安装全流程；新增任务首次运行通过前，不应视为这些平台已验证可用。
+
+### Zcode 会话迁移（实验性）
+
+在「设置 → 实验性功能 → Zcode → Kimi Code Desktop 会话迁移」中扫描本机会话，勾选后导入。默认读取 `~/.zcode`，合并 `cli/db/db.sqlite` 与 `v2/sessions`，写入 `~/.kimi-code`；扫描后可修改目录。迁移前结束源会话并退出 Kimi Code Desktop，完成后重新打开 Desktop。
+
+- 支持旧版 `meta + messages` JSON 和新版 CLI SQLite 的 session/message/part；按 tasks-index 校验任务来源覆盖。选择旧 `v2/sessions` 目录也会自动发现同一数据根下的 CLI 数据库。输出 Kimi 会话 v2 / wire 1.5。
+- 数据库以只读事务读取，保留 message/part 顺序与完整数据库记录快照，恢复当前撤回分支、独立子会话及 artifact 图片。空会话自动忽略，索引存在但找不到原记录的任务明确提示。
+- 按源 `parts` 顺序生成 Kimi 原生思考、文本、工具调用和结果事件，保留错误/中断状态及轮次边界；内嵌图片与视频复制到会话媒体目录。依据 `parentToolUseId` 恢复可关联的子代理工具记录和汇总结果。
+- 每个会话附带 `migration-report.json`，报告工具/思考/附件/子代理数量和缺失信息。Zcode 已截断的输出、未保存的子代理中间对话无法凭空恢复；未知格式或损坏附件会拒绝导入，不静默丢弃。
+- 不迁移运行中的任务、授权、文件回滚记录或模型配置；迁移后的新对话使用 Kimi 当前配置。
+- 旧版纯文本导入会提示「旧版导入可重新迁移」，新版生成独立会话并保留旧会话及其后续对话。
+- 每个导入会话保存完整的 `zcode-source.json` 原始副本；源文件保持不变。重复导入同一源快照会跳过；源会话新增内容后导入新的完整快照，不覆盖已有会话，包括在 Kimi 中继续后的内容。
+- 扫描后源文件变化会拒绝导入，需要重新扫描。单个文件失败不影响其他会话，失败原因显示在页面中。
+- 中断后可重新勾选「已导入」会话，补全索引登记。如果意外退出遗留 `~/.kimi-code/.navo-zcode-migration.lock`，确认没有迁移运行后删除该锁文件再重试。
+
+此集成依赖客户端本地文件格式；Kimi 或 Zcode 更改格式后可能需要更新适配。
+
+兼容性验证：`npm run test:migration:kimi` 使用本机 Kimi 二进制在临时数据目录中验证原生 transcript、图片读取、子代理及继续对话（本地模拟模型，无真实 API 调用）。可用 `KIMI_CODE_BIN` 指定二进制，`NAVO_ZCODE_AUDIT_SOURCE` 指定只读源目录进行全部会话回放检查。

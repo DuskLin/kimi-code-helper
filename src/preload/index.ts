@@ -3,6 +3,20 @@ import { IPC, type HelperApi } from '../shared/contracts'
 
 // 仅暴露白名单业务方法，不允许渲染进程任意调用 IPC。
 const api: HelperApi = {
+  onMigrationProgress: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      progress: import('../shared/session-migration').MigrationProgress
+    ) => listener(progress)
+    ipcRenderer.on(IPC.migrationProgress, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC.migrationProgress, handler)
+    }
+  },
+  chooseMigrationDirectory: (path) => ipcRenderer.invoke(IPC.migrationChooseDirectory, path),
+  scanZcodeSessions: (paths) => ipcRenderer.invoke(IPC.zcodeScan, paths),
+  migrateZcodeSessions: (paths, sessions) =>
+    ipcRenderer.invoke(IPC.zcodeMigrate, { paths, sessions }),
   getKimiDesktop: () => ipcRenderer.invoke(IPC.kimiDesktopGet),
   saveKimiDesktop: (value) => ipcRenderer.invoke(IPC.kimiDesktopSave, value),
   reapplyKimiDesktop: () => ipcRenderer.invoke(IPC.kimiDesktopReapply),

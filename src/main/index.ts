@@ -12,7 +12,7 @@ import {
   shell
 } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IPC } from '../shared/contracts'
 import { SettingsStore } from './services/settings'
@@ -25,6 +25,7 @@ import { createTray } from './tray'
 import { DashboardServer } from './services/dashboard-server'
 import { dashboardSource } from './services/dashboard-source'
 import { startKimiQuotaExport } from './services/kimi-quota-export'
+import { SessionMigrationService } from './services/session-migration-service'
 import { KimiDesktopIntegration } from './services/kimi-desktop-integration'
 import {
   APP_MANAGEMENT_URL,
@@ -179,7 +180,10 @@ void app
     await dashboard.load()
     await service.pricing.load()
     gateway = service
-    const handle = (channel: string, callback: (value: unknown) => unknown): void => {
+    const handle = (
+      channel: string,
+      callback: (value: unknown, event: Electron.IpcMainInvokeEvent) => unknown
+    ): void => {
       ipcMain.handle(channel, (event, value: unknown) => {
         if (
           !event.senderFrame ||
@@ -188,7 +192,7 @@ void app
         ) {
           throw new Error('不允许的调用来源')
         }
-        return callback(value)
+        return callback(value, event)
       })
     }
     let canInstall = app.isPackaged
@@ -231,6 +235,28 @@ void app
       electron: process.versions.electron
     }))
     handle(IPC.settingsGet, () => settings.get())
+    handle(IPC.migrationChooseDirectory, async (currentPath) => {
+      const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const options: Electron.OpenDialogOptions = {
+        title: '选择数据目录',
+        buttonLabel: '选择文件夹',
+        defaultPath:
+          typeof currentPath === 'string' && isAbsolute(currentPath) ? currentPath : undefined,
+        properties: ['openDirectory']
+      }
+      const result = await (parent
+        ? dialog.showOpenDialog(parent, options)
+        : dialog.showOpenDialog(options))
+      return result.canceled ? null : (result.filePaths[0] ?? null)
+    })
+    const sessionMigration = new SessionMigrationService()
+    for (const operation of ['scan', 'migrate'] as const) {
+      handle(operation === 'scan' ? IPC.zcodeScan : IPC.zcodeMigrate, (value, event) =>
+        sessionMigration.run(operation, value, (progress) => {
+          if (!event.sender.isDestroyed()) event.sender.send(IPC.migrationProgress, progress)
+        })
+      )
+    }
     handle(IPC.kimiDesktopGet, () => kimiDesktop!.check())
     const guideKimiPermission = async () => {
       const options: Electron.MessageBoxOptions = {

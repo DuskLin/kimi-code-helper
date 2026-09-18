@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { Monitor, RefreshCw, FlaskConical } from 'lucide-react'
+import { SessionMigrationSettings } from './SessionMigrationSettings'
 import { SettingsToggle } from './SettingsToggle'
 import type { KimiDesktopState, KimiDesktopPreferences } from '../../shared/kimi-desktop'
+import './experimental.css'
 
 export function KimiDesktopSettings() {
   const [state, setState] = useState<KimiDesktopState>()
@@ -52,57 +55,74 @@ export function KimiDesktopSettings() {
     )
   }
   return (
-    <>
-      <h2 className="experimental-heading">
-        Kimi Code Desktop <span className="experimental-badge">实验性功能</span>
-      </h2>
-      <p className="settings-description">在 Desktop 顶部显示账号额度与会话统计。</p>
-      <div className="experimental-notice" role="note">
-        非官方集成，可能随 Kimi Code 更新随时失效。
-      </div>
-      {state ? (
-        <>
-          <div className="card-display-options">
-            <SettingsToggle
-              label="启用集成"
-              hint="需保持 Navo 运行，关闭后移除补丁。"
-              checked={state.enabled}
-              disabled={busy || !state.supported}
-              onChange={(enabled) => save({ enabled })}
-            />
-            <SettingsToggle
-              label="更新后自动恢复"
-              hint="尝试重新注入，不保证兼容新版本。"
-              checked={state.autoReapply}
-              disabled={busy || !state.enabled || !state.supported}
-              onChange={(autoReapply) => save({ autoReapply })}
-            />
+    <div className="experiments-page">
+      <header className="experiments-heading">
+        <div>
+          <span className="experiments-eyebrow">
+            <FlaskConical size={13} /> LABS
+          </span>
+          <h2>实验性功能</h2>
+        </div>
+        <span className="lab-badge">预览</span>
+      </header>
+      <section className="lab-card" aria-label="Kimi Code Desktop 集成">
+        <header className="lab-card-heading">
+          <span className="lab-icon">
+            <Monitor size={20} />
+          </span>
+          <div className="lab-heading-copy">
+            <h3>Kimi Code Desktop</h3>
+            <p>在顶部查看账号额度与会话统计</p>
           </div>
-          <div className="section-toolbar" style={{ marginTop: 20 }}>
-            <span role="status">
-              {state.version ? `Desktop ${state.version} · ` : ''}
-              {state.patched ? '已注入' : state.status}
-            </span>
-            <button
-              className="button"
-              disabled={busy || !state.enabled || !state.compatible}
-              onClick={() => void action(() => window.navo.reapplyKimiDesktop())}
-            >
-              {busy ? '处理中…' : '重新注入'}
-            </button>
-          </div>
-          <p className="settings-description" style={{ marginTop: 16, marginBottom: 0 }}>
-            仅支持 macOS · 注入后在 Kimi Code 按 ⌘R 生效。
+          <span className="lab-badge">macOS</span>
+        </header>
+        {state ? (
+          <>
+            <div className="lab-toggles">
+              <SettingsToggle
+                label="启用集成"
+                hint="随 Navo 运行"
+                checked={state.enabled}
+                disabled={busy || !state.supported}
+                onChange={(enabled) => save({ enabled })}
+              />
+              <SettingsToggle
+                label="更新后自动恢复"
+                hint="Desktop 更新后重新应用集成"
+                checked={state.autoReapply}
+                disabled={busy || !state.enabled || !state.supported}
+                onChange={(autoReapply) => save({ autoReapply })}
+              />
+            </div>
+            <footer className="lab-card-footer">
+              <span className={`lab-status ${state.patched ? 'is-active' : ''}`} role="status">
+                <i />
+                {state.patched ? '已注入' : state.status}
+                {state.version && <span className="lab-version">v{state.version}</span>}
+              </span>
+              <button
+                className="button lab-secondary"
+                disabled={busy || !state.enabled || !state.compatible}
+                onClick={() => void action(() => window.navo.reapplyKimiDesktop())}
+              >
+                <RefreshCw size={14} />
+                {busy ? '处理中…' : '重新注入'}
+              </button>
+            </footer>
+            {state.patched && <p className="lab-footnote">在 Kimi Code 按 ⌘R 刷新生效</p>}
+          </>
+        ) : (
+          <p className="lab-loading" role="status">
+            正在检测 Desktop…
           </p>
-        </>
-      ) : (
-        <p>正在检测 Desktop…</p>
-      )}
-      {(error || state?.error) && (
-        <p role="alert" className="error-banner">
-          {error || state?.error}
-        </p>
-      )}
-    </>
+        )}
+        {(error || state?.error) && (
+          <p role="alert" className="error-banner">
+            {error || state?.error}
+          </p>
+        )}
+      </section>
+      <SessionMigrationSettings />
+    </div>
   )
 }

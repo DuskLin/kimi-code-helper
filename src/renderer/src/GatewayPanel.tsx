@@ -1653,7 +1653,7 @@ export function GatewayPanel({
             <section
               hidden={settingsSection !== 'kimi-desktop'}
               aria-label="实验性功能"
-              className="settings-pane"
+              className="settings-pane experiments-pane"
             >
               <KimiDesktopSettings />
             </section>
