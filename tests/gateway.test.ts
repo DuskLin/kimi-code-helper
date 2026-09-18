@@ -536,6 +536,96 @@ test('shutdown aborts background metadata requests and does not start remaining 
   }
 })
 
+test(
+  'account polling runs before listening and after stopping; only shutdown cancels it',
+  { timeout: 10000 },
+  async (t) => {
+    const f = await storeFixture()
+    const reserved = await listen((_req, res) => res.end())
+    await reserved.close()
+    let remaining = 80
+    let calls = 0
+    let holdModels = false
+    let releaseModels: (() => void) | undefined
+    let aborted = false
+    const gateway = new Gateway(f.store, undefined, async (url, init) => {
+      calls++
+      if (String(url).endsWith('/models')) {
+        if (holdModels) {
+          await new Promise<void>((resolve, reject) => {
+            releaseModels = resolve
+            init!.signal!.addEventListener(
+              'abort',
+              () => {
+                aborted = true
+                reject(init!.signal!.reason)
+              },
+              { once: true }
+            )
+          })
+        }
+        return Response.json({ data: [{ id: 'm' }] })
+      }
+      return Response.json({ usage: { limit: 100, remaining } })
+    })
+    const expire = () =>
+      f.store.mutate((data) => {
+        data.accounts[0].capabilities!.checkedAt = 0
+      })
+    try {
+      await f.store.saveAccount(accountInput('a'))
+      await f.store.saveAccount({ ...accountInput('disabled'), enabled: false })
+      await gateway.saveSettings({ ...f.store.get().settings, port: reserved.port })
+      t.mock.timers.enable({ apis: ['setInterval'] })
+      gateway.startAccountRefresh()
+      gateway.startAccountRefresh()
+      await gateway.refreshStaleAccounts()
+      assert.equal(gateway.snapshot().running, false)
+      assert.equal(calls, 2)
+      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 80)
+      assert.equal(f.store.get().accounts[1].capabilities, null)
+
+      remaining = 60
+      await expire()
+      t.mock.timers.tick(30000)
+      await eventually(() => calls === 4)
+      await gateway.refreshStaleAccounts()
+      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 60)
+
+      await gateway.setRunning(true)
+      await gateway.refreshStaleAccounts()
+      remaining = 40
+      holdModels = true
+      await expire()
+      t.mock.timers.tick(30000)
+      await eventually(() => !!releaseModels)
+      const stopped = await gateway.setRunning(false)
+      assert.equal(stopped.running, false)
+      assert.equal(aborted, false)
+      holdModels = false
+      releaseModels!()
+      await gateway.refreshStaleAccounts()
+      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 40)
+
+      remaining = 20
+      await expire()
+      t.mock.timers.tick(30000)
+      await eventually(() => calls === 8)
+      await gateway.refreshStaleAccounts()
+      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 20)
+      await gateway.shutdown()
+      await expire()
+      t.mock.timers.tick(30000)
+      assert.equal(calls, 8)
+    } finally {
+      releaseModels?.()
+      await gateway.shutdown()
+      gateway.history.close()
+      await f.cleanup()
+    }
+  }
+)
+
 test('upstream finish failures are accounted as interruptions in JSON and SSE passthrough', async () => {
   for (const stream of [false, true]) {
     const chunk = {

@@ -216,7 +216,20 @@ export class Gateway {
     })
   }
   shutdown(): Promise<void> {
-    return this.exclusive(() => this.stop())
+    return this.exclusive(async () => {
+      clearInterval(this.refreshTimer)
+      this.refreshTimer = undefined
+      this.refreshController?.abort(new Error('应用正在退出'))
+      await this.stop()
+      await this.refreshWork
+    })
+  }
+  /** Account monitoring belongs to the application lifecycle, not the HTTP listener. */
+  startAccountRefresh(): void {
+    if (this.refreshTimer) return
+    this.refreshTimer = setInterval(() => void this.refreshStaleAccounts(), QUOTA_REFRESH_MS)
+    this.refreshTimer.unref()
+    void this.refreshStaleAccounts()
   }
   private async start(): Promise<void> {
     if (this.server?.listening) return
@@ -244,8 +257,6 @@ export class Gateway {
       })
       this.server = server
       this.error = ''
-      this.refreshTimer = setInterval(() => void this.refreshStaleAccounts(), QUOTA_REFRESH_MS)
-      this.refreshTimer.unref()
       void this.refreshStaleAccounts()
       server.on('error', () => {
         this.error = '本地网关发生监听错误，请停止后重新启动'
@@ -259,9 +270,6 @@ export class Gateway {
     }
   }
   private async stop(): Promise<void> {
-    clearInterval(this.refreshTimer)
-    this.refreshTimer = undefined
-    this.refreshController?.abort(new Error('网关已停止'))
     const server = this.server
     for (const controller of this.controllers) controller.abort(new Error('网关已停止'))
     if (server)
@@ -271,7 +279,6 @@ export class Gateway {
       })
     this.server = undefined
     await Promise.allSettled([...this.activeRequests])
-    await this.refreshWork
     this.error = ''
   }
   async saveSettings(value: unknown): Promise<GatewaySnapshot> {

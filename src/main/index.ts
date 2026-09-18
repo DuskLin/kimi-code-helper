@@ -253,7 +253,7 @@ void app
     tray = createTray(showWindow, (listener) => service.onActiveRequestsChange(listener))
     createWindow()
     updater.start()
-    void service.refreshStaleAccounts()
+    service.startAccountRefresh()
     app.on('activate', showWindow)
   })
   .catch((error) => {
