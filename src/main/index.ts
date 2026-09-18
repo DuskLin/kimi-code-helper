@@ -24,6 +24,9 @@ import { UnsignedMacUpdater } from './services/mac-updater'
 import { createTray } from './tray'
 import { DashboardServer } from './services/dashboard-server'
 import { dashboardSource } from './services/dashboard-source'
+import { startKimiQuotaExport } from './services/kimi-quota-export'
+import { KimiDesktopIntegration } from './services/kimi-desktop-integration'
+import kimiQuotaWidget from '../../scripts/kimi-quota/widget.js?raw'
 
 app.setName('Navo')
 app.setPath('userData', join(app.getPath('appData'), 'Navo'))
@@ -35,6 +38,8 @@ if (!ownsInstance) app.quit()
 let gateway: Gateway | undefined
 let dashboard: DashboardServer | undefined
 let usageService: UsageService | undefined
+let stopKimiQuotaExport: (() => void) | undefined
+let kimiDesktop: KimiDesktopIntegration | undefined
 let updates: UpdateService | undefined
 let quitting = false
 let tray: Electron.Tray | undefined
@@ -128,6 +133,13 @@ void app
     })
     await gatewayStore.load()
     const service = new Gateway(gatewayStore)
+    kimiDesktop = new KimiDesktopIntegration(app.getPath('userData'), kimiQuotaWidget)
+    await kimiDesktop.load()
+    kimiDesktop.start()
+    stopKimiQuotaExport = startKimiQuotaExport(
+      app.getPath('userData'),
+      () => gatewayStore.get().accounts
+    )
     const statistics = new UsageService(gatewayStore.historyPath)
     usageService = statistics
     dashboard = new DashboardServer({
@@ -213,6 +225,9 @@ void app
       electron: process.versions.electron
     }))
     handle(IPC.settingsGet, () => settings.get())
+    handle(IPC.kimiDesktopGet, () => kimiDesktop!.check())
+    handle(IPC.kimiDesktopSave, (value) => kimiDesktop!.save(value))
+    handle(IPC.kimiDesktopReapply, () => kimiDesktop!.reapply())
     handle(IPC.settingsSave, async (value) => {
       const saved = await settings.save(value)
       nativeTheme.themeSource = saved.theme
@@ -329,6 +344,8 @@ app.on('before-quit', (event) => {
 
 // before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
 app.on('quit', () => {
+  stopKimiQuotaExport?.()
+  kimiDesktop?.close()
   dashboard?.tunnel.terminate()
   void usageService?.close()
   tray?.destroy()

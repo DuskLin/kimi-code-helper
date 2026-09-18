@@ -12,6 +12,7 @@ import {
 } from 'react'
 import { SettingsToggle } from './SettingsToggle'
 import { DashboardSettings } from './DashboardSettings'
+import { KimiDesktopSettings } from './KimiDesktopSettings'
 import { createPortal } from 'react-dom'
 import {
   Globe,
@@ -765,7 +766,7 @@ export function GatewayPanel({
   const [snapshot, setSnapshot] = useState<GatewaySnapshot>()
   const [cardDisplay, setCardDisplay] = useState(readCardDisplay)
   const [settingsSection, setSettingsSection] = useState<
-    'display' | 'accounts' | 'gateway' | 'dashboard'
+    'display' | 'accounts' | 'gateway' | 'dashboard' | 'kimi-desktop'
   >('display')
   const [accountSpeeds, setAccountSpeeds] = useState<UsageStats['byAccount']>([])
   const [usageRefreshInterval, setUsageRefreshInterval] = useState(5000)
@@ -1137,7 +1138,8 @@ export function GatewayPanel({
                 ['display', '卡片管理', PanelsTopLeft],
                 ['accounts', '账号管理', Users],
                 ['gateway', '网关设置', Settings2],
-                ['dashboard', '远程仪表盘', Globe]
+                ['dashboard', '远程仪表盘', Globe],
+                ['kimi-desktop', 'Kimi Code Desktop', PanelsTopLeft]
               ] as const
             ).map(([id, label, Icon]) => (
               <button
@@ -1645,6 +1647,13 @@ export function GatewayPanel({
               className="settings-pane"
             >
               <DashboardSettings />
+            </section>
+            <section
+              hidden={settingsSection !== 'kimi-desktop'}
+              aria-label="Kimi Code Desktop"
+              className="settings-pane"
+            >
+              <KimiDesktopSettings />
             </section>
           </div>
         </div>

@@ -3,6 +3,9 @@ import { IPC, type HelperApi } from '../shared/contracts'
 
 // 仅暴露白名单业务方法，不允许渲染进程任意调用 IPC。
 const api: HelperApi = {
+  getKimiDesktop: () => ipcRenderer.invoke(IPC.kimiDesktopGet),
+  saveKimiDesktop: (value) => ipcRenderer.invoke(IPC.kimiDesktopSave, value),
+  reapplyKimiDesktop: () => ipcRenderer.invoke(IPC.kimiDesktopReapply),
   getDashboard: () => ipcRenderer.invoke(IPC.dashboardGet),
   saveDashboard: (input) => ipcRenderer.invoke(IPC.dashboardSave, input),
   rotateDashboardCode: () => ipcRenderer.invoke(IPC.dashboardRotate),

@@ -11,6 +11,11 @@ export interface AppInfo {
 }
 
 export interface HelperApi {
+  getKimiDesktop(): Promise<import('./kimi-desktop').KimiDesktopState>
+  saveKimiDesktop(
+    value: import('./kimi-desktop').KimiDesktopPreferences
+  ): Promise<import('./kimi-desktop').KimiDesktopState>
+  reapplyKimiDesktop(): Promise<import('./kimi-desktop').KimiDesktopState>
   getDashboard(): Promise<import('./dashboard').DashboardState>
   saveDashboard(
     input: import('./dashboard').DashboardSettings & { token?: string }
@@ -247,6 +252,9 @@ export interface RequestHistoryPage {
 }
 
 export const IPC = {
+  kimiDesktopGet: 'kimi-desktop:get',
+  kimiDesktopSave: 'kimi-desktop:save',
+  kimiDesktopReapply: 'kimi-desktop:reapply',
   dashboardGet: 'dashboard:get',
   dashboardSave: 'dashboard:save',
   dashboardRotate: 'dashboard:rotate',
