@@ -17,7 +17,7 @@ export interface HelperApi {
   ): Promise<import('./dashboard').DashboardState>
   rotateDashboardCode(): Promise<import('./dashboard').DashboardState>
   copyDashboardCode(): Promise<void>
-  copyDashboardUrl(): Promise<void>
+  copyDashboardUrl(lanUrl?: string): Promise<void>
   checkDashboardPublic(): Promise<import('./dashboard').DashboardState>
   openDashboard(): Promise<void>
   getUpdateState(): Promise<import('./updates').UpdateState>

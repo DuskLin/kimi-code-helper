@@ -163,7 +163,7 @@ async function launch() {
     .locator('.app-status')
     .filter({ hasText: /网关运行中|网关已停止/ })
     .waitFor()
-  await page.getByRole('button', { name: '网关设置', exact: true }).waitFor()
+  await page.getByRole('button', { name: '设置', exact: true }).waitFor()
   return page
 }
 
@@ -224,17 +224,61 @@ try {
   await application.evaluate(({ ipcMain }, snapshot) => {
     ipcMain.handle('gateway:get', () => snapshot)
   }, initialGateway)
-  await page.getByRole('button', { name: '网关设置', exact: true }).waitFor()
+  await page.getByRole('button', { name: '设置', exact: true }).waitFor()
   assert.equal(await page.getByRole('alert').count(), 0)
   await application.close()
   application = undefined
   page = await launch()
 
   assert.equal(await page.getByRole('tablist', { name: '网关管理' }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: '卡片管理', exact: true }).count(), 0)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('heading', { name: '卡片管理', exact: true }).waitFor()
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.getByLabel('模型表现', { exact: true }).uncheck()
+  await page.getByRole('button', { name: '网关设置', exact: true }).click()
+  assert.equal(
+    await page
+      .locator('section[aria-label="网关设置"] fieldset')
+      .evaluate((element) => getComputedStyle(element).borderTopWidth),
+    '0px'
+  )
+  await page.screenshot({ path: join(artifacts, 'settings-gateway.png') })
+  await page.getByRole('button', { name: '深色模式', exact: true }).click()
+  await page.screenshot({ path: join(artifacts, 'settings-gateway-dark.png') })
+  await page.getByRole('button', { name: '浅色模式', exact: true }).click()
+  const originalTimeout = await page.getByLabel('请求总超时（秒）', { exact: true }).inputValue()
+  await page.getByLabel('请求总超时（秒）', { exact: true }).fill('123')
+  await page.getByRole('button', { name: '远程仪表盘', exact: true }).click()
+  await page.getByLabel('HTTPS 端口', { exact: true }).waitFor()
+  const originalDashboardPort = await page.getByLabel('HTTPS 端口', { exact: true }).inputValue()
+  await page.getByLabel('HTTPS 端口', { exact: true }).fill('18444')
+  await page.screenshot({ path: join(artifacts, 'settings-dashboard.png') })
+  await page.getByRole('button', { name: '网关设置', exact: true }).click()
+  assert.equal(await page.getByLabel('请求总超时（秒）', { exact: true }).inputValue(), '123')
+  await page.getByRole('button', { name: '重置修改', exact: true }).click()
+  assert.equal(
+    await page.getByLabel('请求总超时（秒）', { exact: true }).inputValue(),
+    originalTimeout
+  )
+  await page.getByRole('button', { name: '远程仪表盘', exact: true }).click()
+  assert.equal(await page.getByLabel('HTTPS 端口', { exact: true }).inputValue(), '18444')
+  await page.getByRole('button', { name: '重置修改', exact: true }).click()
+  assert.equal(
+    await page.getByLabel('HTTPS 端口', { exact: true }).inputValue(),
+    originalDashboardPort
+  )
+  await page.getByRole('button', { name: '返回概览', exact: true }).click()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '卡片管理', exact: true }).click()
+  assert.equal(await page.getByLabel('模型表现', { exact: true }).isChecked(), false)
+  await page.getByLabel('模型表现', { exact: true }).check()
+  await page.screenshot({ path: join(artifacts, 'settings-display.png') })
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   await page.getByRole('tablist', { name: '网关管理' }).waitFor()
   await page.getByRole('button', { name: '返回概览', exact: true }).click()
   assert.equal(await page.getByRole('tablist', { name: '网关管理' }).count(), 0)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   assert.equal(await page.getByRole('tab', { name: '分组管理' }).count(), 0)
   for (const name of ['开发账号 A', '开发账号 B']) {
@@ -409,9 +453,13 @@ try {
   await page.getByLabel(/^监听端口/).fill(String(gatewayPort))
   await page.getByLabel('打开应用时自动启动网关', { exact: true }).check()
   await page.getByRole('button', { name: '保存设置', exact: true }).click()
-  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  await page.getByText('网关设置已保存', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '账号管理', exact: true }).click()
+  await page.getByRole('button', { name: '返回概览', exact: true }).click()
   await page.getByRole('button', { name: '启动网关', exact: true }).click()
   await page.getByRole('button', { name: '停止网关', exact: true }).waitFor()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '账号管理', exact: true }).click()
   const originalClipboard = await application.evaluate(({ clipboard }) => clipboard.readText())
   let groupKey
   try {
@@ -768,6 +816,7 @@ try {
   assert.equal(restoredGateway.accounts.find((a) => a.name === '开发账号 A').maxConcurrency, 5)
   assert.equal(restoredGateway.accounts.find((a) => a.name === '开发账号 A').concurrencyOverride, 5)
   assert.equal(await page.getByRole('tablist', { name: '网关管理' }).count(), 0)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   await page.getByText('开发账号 A', { exact: true }).waitFor()
   // 关闭窗口只隐藏，后台网关仍然处理真实 HTTP 请求。
@@ -903,6 +952,7 @@ try {
   assert.equal(deepseekAccount.capabilities.balance.balances.length, 2)
   await page.getByText('DeepSeek 测试账号', { exact: true }).waitFor()
   await page.screenshot({ path: join(artifacts, 'deepseek-overview.png') })
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   await page.getByRole('button', { name: '添加账号', exact: true }).click()
   await page.getByLabel('供应商', { exact: true }).selectOption('opencode-go')
@@ -955,6 +1005,7 @@ try {
   assert.deepEqual(goAccount.modelProtocols['minimax-test'], ['responses'])
   await page.getByText('OpenCode Go 测试账号', { exact: true }).waitFor()
   await page.screenshot({ path: join(artifacts, 'opencode-go-overview.png') })
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '账号管理', exact: true }).click()
   await application.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(640, 440)
@@ -965,6 +1016,7 @@ try {
     true
   )
   await page.screenshot({ path: join(artifacts, 'compact.png') })
+  await page.getByRole('button', { name: '返回概览', exact: true }).click()
   await page.getByRole('button', { name: '停止网关', exact: true }).click()
   await page.getByRole('button', { name: '启动网关', exact: true }).waitFor()
   await page.getByRole('button', { name: '复制 URL', exact: true }).waitFor({ state: 'hidden' })
@@ -1032,7 +1084,6 @@ try {
     ipcMain.handle('gateway:usage-stats', () => stats)
     BrowserWindow.getAllWindows()[0].setSize(1120, 900)
   }, performancePreview)
-  await page.getByRole('button', { name: '返回概览', exact: true }).click()
   const performanceTable = page.getByRole('table', {
     name: 'kimi-for-coding-highspeed 峰谷表现',
     exact: true

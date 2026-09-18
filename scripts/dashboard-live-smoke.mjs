@@ -25,7 +25,7 @@ let app, browser
 try {
   app = await electron.launch({ args: [entry], env })
   const desktop = await app.firstWindow()
-  await desktop.getByRole('button', { name: '远程仪表盘', exact: true }).waitFor()
+  await desktop.getByRole('button', { name: '设置', exact: true }).waitFor()
   await desktop.evaluate(async () => {
     const state = await window.kimiHelper.getGateway()
     await window.kimiHelper.saveAccount({
@@ -73,8 +73,42 @@ try {
   assert.equal(await page.evaluate(() => document.cookie.includes('navo_dashboard')), false)
   await mkdir('artifacts/mobile', { recursive: true })
   await page.screenshot({ path: 'artifacts/mobile/live-login-390.png', fullPage: true })
+  await desktop.getByRole('button', { name: '设置', exact: true }).click()
   await desktop.getByRole('button', { name: '远程仪表盘', exact: true }).click()
-  await desktop.getByRole('dialog', { name: '远程仪表盘' }).waitFor()
+  await desktop.getByRole('heading', { name: '远程仪表盘' }).waitFor()
+  try {
+    for (const url of state.lanUrls) {
+      await desktop.getByRole('button', { name: `复制局域网地址 ${url}`, exact: true }).click()
+      await desktop.getByText('局域网地址已复制', { exact: true }).waitFor()
+      assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), url)
+    }
+  } finally {
+    await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), originalClipboard)
+  }
+  assert.equal(await desktop.getByRole('button', { name: '设置', exact: true }).count(), 0)
+  assert.equal(await desktop.getByRole('button', { name: /^(启动|停止)网关$/ }).count(), 0)
+  await desktop.getByLabel('HTTPS 端口', { exact: true }).fill(String(port + 1))
+  await desktop.getByRole('switch', { name: '启用只读仪表盘', exact: true }).click()
+  await desktop.getByText('仪表盘已关闭', { exact: true }).waitFor()
+  assert.equal((await desktop.evaluate(() => window.kimiHelper.getDashboard())).running, false)
+  await assert.rejects(() =>
+    context.request.get(`${state.localUrl}/api/snapshot`, { timeout: 3000 })
+  )
+  await desktop.getByRole('switch', { name: '启用只读仪表盘', exact: true }).click()
+  await desktop.getByText('仪表盘已启动', { exact: true }).waitFor()
+  const restarted = await desktop.evaluate(() => window.kimiHelper.getDashboard())
+  assert.equal(restarted.running, true)
+  assert.equal(restarted.settings.port, port)
+  assert.equal(
+    await desktop.getByLabel('HTTPS 端口', { exact: true }).inputValue(),
+    String(port + 1)
+  )
+  assert.equal((await context.request.get(`${state.localUrl}/api/snapshot`)).status(), 401)
+  await page.reload()
+  await page.getByLabel('访问码', { exact: true }).fill(code)
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await page.getByRole('link', { name: '查看实时验证账号详情' }).waitFor()
+  await desktop.getByRole('button', { name: '重置修改', exact: true }).click()
   await desktop.screenshot({ path: 'artifacts/mobile/desktop-sharing.png' })
   for (const url of state.lanUrls) {
     const result = await context.request.get(`${url}/api/snapshot`)

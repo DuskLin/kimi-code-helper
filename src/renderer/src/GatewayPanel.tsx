@@ -10,9 +10,11 @@ import {
   type ReactElement,
   type ReactNode
 } from 'react'
+import { SettingsToggle } from './SettingsToggle'
 import { DashboardSettings } from './DashboardSettings'
 import { createPortal } from 'react-dom'
 import {
+  Globe,
   CircleHelp,
   List,
   PanelsTopLeft,
@@ -749,7 +751,7 @@ export interface GatewayStatus {
   error: string
 }
 
-export type GatewayPage = 'overview' | 'management' | 'flow'
+export type GatewayPage = 'overview' | 'settings' | 'flow'
 
 export function GatewayPanel({
   onStatusChange,
@@ -762,7 +764,9 @@ export function GatewayPanel({
 }) {
   const [snapshot, setSnapshot] = useState<GatewaySnapshot>()
   const [cardDisplay, setCardDisplay] = useState(readCardDisplay)
-  const [displaySettingsOpen, setDisplaySettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<
+    'display' | 'accounts' | 'gateway' | 'dashboard'
+  >('display')
   const [accountSpeeds, setAccountSpeeds] = useState<UsageStats['byAccount']>([])
   const [usageRefreshInterval, setUsageRefreshInterval] = useState(5000)
   const [tab, setTab] = useState<'accounts' | 'activity' | 'pricing'>('accounts')
@@ -772,7 +776,7 @@ export function GatewayPanel({
   const [historyError, setHistoryError] = useState('')
   const historyCursor = historyCursors.at(-1)
   useEffect(() => {
-    if (page !== 'management' || tab !== 'activity') return
+    if (page !== 'settings' || settingsSection !== 'accounts' || tab !== 'activity') return
     let active = true
     let timer: ReturnType<typeof setTimeout>
     setHistoryLoading(true)
@@ -795,7 +799,7 @@ export function GatewayPanel({
       active = false
       clearTimeout(timer)
     }
-  }, [page, tab, historyCursor])
+  }, [page, settingsSection, tab, historyCursor])
   const [error, setError] = useState('')
   const [connectionError, setConnectionError] = useState('')
   const [notice, setNotice] = useState('')
@@ -804,7 +808,6 @@ export function GatewayPanel({
   const [accountEdit, setAccountEdit] = useState<
     AccountInput & { capabilities?: AccountCapabilities | null }
   >()
-  const [settingsEdit, setSettingsEdit] = useState<GatewaySettings>()
   const [rotatingKey, setRotatingKey] = useState(false)
   const [deleting, setDeleting] = useState<{
     type: 'account'
@@ -931,60 +934,49 @@ export function GatewayPanel({
     <div className={`gateway-workspace ${page === 'flow' ? 'flow-workspace' : ''}`}>
       {page !== 'flow' && (
         <div className="gateway-actions">
-          {page === 'management' && (
+          {page === 'settings' && (
             <button className="button back-to-overview" onClick={() => setPage('overview')}>
               <ArrowLeft size={15} />
               返回概览
             </button>
           )}
-          <div className="toolbar">
-            {page === 'overview' && (
-              <button
-                className="usage-refresh"
-                aria-label="切换自动刷新间隔"
-                title={`每 ${usageRefreshInterval / 1000} 秒自动刷新，点击切换为 ${usageRefreshInterval === 5000 ? 15 : usageRefreshInterval === 15000 ? 30 : 5} 秒`}
-                onClick={() =>
-                  setUsageRefreshInterval((value) =>
-                    value === 5000 ? 15000 : value === 15000 ? 30000 : 5000
-                  )
-                }
+          {page === 'overview' && (
+            <div className="toolbar">
+              {page === 'overview' && (
+                <button
+                  className="usage-refresh"
+                  aria-label="切换自动刷新间隔"
+                  title={`每 ${usageRefreshInterval / 1000} 秒自动刷新，点击切换为 ${usageRefreshInterval === 5000 ? 15 : usageRefreshInterval === 15000 ? 30 : 5} 秒`}
+                  onClick={() =>
+                    setUsageRefreshInterval((value) =>
+                      value === 5000 ? 15000 : value === 15000 ? 30000 : 5000
+                    )
+                  }
+                >
+                  <RotateCcw size={14} />
+                  <span>{usageRefreshInterval / 1000}s</span>
+                </button>
+              )}
+              <button className="button" aria-pressed={false} onClick={() => setPage('settings')}>
+                <Settings2 size={15} />
+                设置
+              </button>
+              <span
+                className={`gateway-toggle ${stopBlocked ? 'is-in-use' : ''}`}
+                title={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
               >
-                <RotateCcw size={14} />
-                <span>{usageRefreshInterval / 1000}s</span>
-              </button>
-            )}
-            {page === 'overview' && (
-              <button className="button" onClick={() => setDisplaySettingsOpen(true)}>
-                <PanelsTopLeft size={15} />
-                卡片显示
-              </button>
-            )}
-            {page === 'overview' && (
-              <button className="button" onClick={() => setPage('management')}>
-                <Users size={15} />
-                账号管理
-              </button>
-            )}
-            <button className="button" onClick={() => setSettingsEdit(snapshot.settings)}>
-              <Settings2 size={15} />
-              网关设置
-            </button>
-            <DashboardSettings />
-            <span
-              className={`gateway-toggle ${stopBlocked ? 'is-in-use' : ''}`}
-              title={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
-            >
-              <button
-                className={`button ${snapshot.running ? '' : 'primary'}`}
-                disabled={busy || stopBlocked}
-                aria-description={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
-                onClick={() => void action(() => api.setGatewayRunning(!snapshot.running))}
-              >
-                {snapshot.running ? <Square size={14} /> : <Play size={14} />}
-                {snapshot.running ? '停止网关' : '启动网关'}
-              </button>
-            </span>
-          </div>
+                <button
+                  className={`button ${snapshot.running ? '' : 'primary'}`}
+                  disabled={busy || stopBlocked}
+                  aria-description={stopBlocked ? '网关使用中，请在请求结束后重试' : undefined}
+                  onClick={() => void action(() => api.setGatewayRunning(!snapshot.running))}
+                >
+                  {snapshot.running ? <Square size={14} /> : <Play size={14} />}
+                  {snapshot.running ? '停止网关' : '启动网关'}
+                </button>
+              </span>
+            </div>
+          )}
         </div>
       )}
       {(error || connectionError || snapshot.error) && (
@@ -1019,7 +1011,13 @@ export function GatewayPanel({
             <div className="quota-overview-empty">
               <Users size={24} />
               <p>关联账号后，这里会展示 Kimi、OpenCode Go 剩余额度和 DeepSeek 余额。</p>
-              <button className="text-button" onClick={() => setPage('management')}>
+              <button
+                className="text-button"
+                onClick={() => {
+                  setSettingsSection('accounts')
+                  setPage('settings')
+                }}
+              >
                 前往账号管理
                 <ArrowUpRight size={14} />
               </button>
@@ -1130,438 +1128,526 @@ export function GatewayPanel({
           showUsageTrend={cardDisplay.usageTrend}
         />
       )}
-      {displaySettingsOpen && (
-        <Modal title="卡片显示" close={() => setDisplaySettingsOpen(false)}>
-          <p className="muted">选择概览中显示的模块，修改后立即生效并自动保存。</p>
-          <div className="card-display-options">
+      {page === 'settings' && (
+        <div className="settings-layout">
+          <nav className="settings-sidebar" aria-label="设置分类">
+            <h1>设置</h1>
             {(
               [
-                ['estimates', '额度估算', '包含估算总额、估算可用、估算均值和缓存命中率'],
-                ['performance', '模型表现', '显示各模型的首 token 时间和生成速度'],
-                ['tokenActivity', 'Token 活动', '显示累计 Token、聊天时长、连续天数和活动热力图'],
-                ['usageTrend', '用量统计与趋势', '显示当天的 Token 消耗、请求数、成本汇总和趋势图']
+                ['display', '卡片管理', PanelsTopLeft],
+                ['accounts', '账号管理', Users],
+                ['gateway', '网关设置', Settings2],
+                ['dashboard', '远程仪表盘', Globe]
               ] as const
-            ).map(([key, label, hint]) => (
-              <label key={key}>
-                <input
-                  type="checkbox"
-                  aria-label={label}
-                  checked={cardDisplay[key]}
-                  onChange={(event) => {
-                    const next = { ...cardDisplay, [key]: event.target.checked }
-                    try {
-                      localStorage.setItem(cardDisplayKey, JSON.stringify(next))
-                      setCardDisplay(next)
-                    } catch {
-                      setError('卡片显示设置保存失败，请重试。')
-                    }
-                  }}
-                />
-                <span>
-                  {label}
-                  <small>{hint}</small>
-                </span>
-              </label>
+            ).map(([id, label, Icon]) => (
+              <button
+                key={id}
+                className={settingsSection === id ? 'selected' : ''}
+                aria-current={settingsSection === id ? 'page' : undefined}
+                onClick={() => setSettingsSection(id)}
+              >
+                <Icon size={16} />
+                {label}
+              </button>
             ))}
-          </div>
-        </Modal>
-      )}
-      {page === 'management' && (
-        <section aria-label="账号管理">
-          <div className="content-panel">
-            <div className="panel-tabs" role="tablist" aria-label="网关管理">
-              {(
-                [
-                  ['accounts', '账号池', Users],
-                  ['activity', '请求记录', Activity],
-                  ['pricing', '费用管理', Coins]
-                ] as const
-              ).map(([id, name, Icon]) => (
-                <button role="tab" aria-selected={tab === id} key={id} onClick={() => setTab(id)}>
-                  <Icon size={15} />
-                  {name}
-                  {id === 'accounts' && <span className="count">{snapshot.accounts.length}</span>}
-                </button>
-              ))}
-            </div>
-            {tab === 'accounts' && (
-              <>
-                <div className="section-toolbar">
-                  <span className="badge">并发与额度均衡 · 粘性会话优先</span>
-                  <button className="button primary" onClick={() => setAccountEdit(newAccount())}>
-                    <Plus size={15} />
-                    添加账号
-                  </button>
-                </div>
-                <div className="connection-strip">
-                  <div>
-                    <span className={`status-dot ${group.enabled ? 'on' : ''}`} />
-                    <code>{snapshot.baseUrl}/v1</code>
-                  </div>
-                  <div className="toolbar">
-                    <button className="text-button" onClick={() => copy('url')}>
-                      <Copy size={13} />
-                      地址
-                    </button>
-                    <button className="text-button" onClick={() => copy('registry')}>
-                      <Copy size={13} />
-                      复制 api.json 链接
-                    </button>
-                  </div>
-                </div>
-                {(snapshot.lanBaseUrls ?? []).map((baseUrl) => (
-                  <div className="connection-strip" key={baseUrl} aria-label="局域网连接">
-                    <div>
-                      <span
-                        className={`status-dot ${snapshot.running && group.enabled ? 'on' : ''}`}
-                      />
-                      <code>{baseUrl}/v1</code>
-                    </div>
-                    <div className="toolbar">
-                      <button
-                        className="text-button"
-                        onClick={() => copy('url', new URL(baseUrl).hostname)}
-                      >
-                        <Copy size={13} />
-                        地址
-                      </button>
-                      <button className="text-button" onClick={() => copy('key')}>
-                        <Copy size={13} />
-                        密钥
-                      </button>
-                      <button
-                        className="text-button"
-                        onClick={() => copy('registry', new URL(baseUrl).hostname)}
-                      >
-                        <Copy size={13} />
-                        复制 api.json 链接
-                      </button>
-                      <button
-                        className="text-button"
-                        disabled={busy}
-                        onClick={() => setRotatingKey(true)}
-                      >
-                        <RotateCcw size={13} />
-                        轮换密钥
-                      </button>
-                    </div>
-                  </div>
+          </nav>
+          <div className="settings-content">
+            <section
+              hidden={settingsSection !== 'display'}
+              aria-label="卡片管理"
+              className="settings-pane"
+            >
+              <h2>卡片管理</h2>
+              <p className="settings-description">
+                选择概览中显示的模块，修改后立即生效并自动保存。
+              </p>
+              <div className="card-display-options">
+                {(
+                  [
+                    ['estimates', '额度估算', '包含估算总额、估算可用、估算均值和缓存命中率'],
+                    ['performance', '模型表现', '显示各模型的首 token 时间和生成速度'],
+                    [
+                      'tokenActivity',
+                      'Token 活动',
+                      '显示累计 Token、聊天时长、连续天数和活动热力图'
+                    ],
+                    [
+                      'usageTrend',
+                      '用量统计与趋势',
+                      '显示当天的 Token 消耗、请求数、成本汇总和趋势图'
+                    ]
+                  ] as const
+                ).map(([key, label, hint]) => (
+                  <SettingsToggle
+                    key={key}
+                    label={label}
+                    hint={hint}
+                    checked={cardDisplay[key]}
+                    onChange={(checked) => {
+                      const next = { ...cardDisplay, [key]: checked }
+                      try {
+                        localStorage.setItem(cardDisplayKey, JSON.stringify(next))
+                        setCardDisplay(next)
+                      } catch {
+                        setError('卡片管理设置保存失败，请重试。')
+                      }
+                    }}
+                  />
                 ))}
-                {snapshot.settings.lanSharing && !snapshot.lanBaseUrls?.length && (
-                  <p className="muted">未检测到局域网 IPv4 地址，请连接 Wi-Fi 或有线网络。</p>
-                )}
-                <details className="connection-help">
-                  <summary>如何接入客户端</summary>
-                  <p>
-                    Kimi Code：启动网关，复制「api.json 链接」，在「添加供应商 → 注册表」中粘贴到
-                    「注册表 URL」。本机连接无需密钥；局域网连接需点击「密钥」复制并填入「API
-                    Key」。 模型来自已启用且同步成功的账号；同一 URL 重复导入可刷新模型列表。
-                  </p>
-                  <p>
-                    本机客户端无需密钥（客户端要求填写时可填任意占位值），局域网客户端使用上方地址与网关密钥；Anthropic
-                    Base URL 去掉末尾 /v1。Kimi 默认模型为 kimi-for-coding；使用 DeepSeek
-                    时请将客户端模型改为同步列表中的 DeepSeek 模型。
-                  </p>
-                </details>
-                {!accounts.length ? (
-                  <div className="empty-state">
-                    <div className="empty-icon">
-                      <Users size={26} />
-                    </div>
-                    <h2>添加第一个账号</h2>
-                    <p>
-                      填写 Kimi Code、DeepSeek 或 OpenCode Go API Key 即可接入。
-                      <br />
-                      添加多个账号后，网关将自动均衡分配请求。
-                    </p>
-                    <button className="button" onClick={() => setAccountEdit(newAccount())}>
-                      <Plus size={15} />
-                      添加第一个账号
+              </div>
+            </section>
+            <section
+              hidden={settingsSection !== 'accounts'}
+              aria-label="账号管理"
+              className="settings-pane settings-accounts"
+            >
+              <h2>账号管理</h2>
+              <p className="settings-description">管理账号、查看请求记录与模型费用。</p>
+              <div className="content-panel">
+                <div className="panel-tabs" role="tablist" aria-label="网关管理">
+                  {(
+                    [
+                      ['accounts', '账号池', Users],
+                      ['activity', '请求记录', Activity],
+                      ['pricing', '费用管理', Coins]
+                    ] as const
+                  ).map(([id, name, Icon]) => (
+                    <button
+                      role="tab"
+                      aria-selected={tab === id}
+                      key={id}
+                      onClick={() => setTab(id)}
+                    >
+                      <Icon size={15} />
+                      {name}
+                      {id === 'accounts' && (
+                        <span className="count">{snapshot.accounts.length}</span>
+                      )}
                     </button>
-                  </div>
-                ) : (
-                  <div className="table-scroll">
-                    <table className="account-table">
-                      <thead>
-                        <tr>
-                          <th>账号</th>
-                          <th>状态</th>
-                          <th>并发</th>
-                          <th>额度 / 余额</th>
-                          <th>成功 / 失败</th>
-                          <th className="align-right">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {accounts.map((account) => {
-                          const status = accountStatus(account)
-                          return (
-                            <tr key={account.id}>
-                              <td>
-                                <div className="account-name">
-                                  <span className="account-avatar">
-                                    <ProviderLogo provider={account.provider} />
-                                  </span>
-                                  <div>
-                                    <strong>{account.name}</strong>
-                                    <small>
-                                      {account.provider === 'opencode-go'
-                                        ? 'OpenCode Go · 订阅'
-                                        : account.provider === 'deepseek'
-                                          ? 'DeepSeek · 按量付费'
-                                          : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
-                                    </small>
-                                  </div>
-                                </div>
-                              </td>
-                              <td>
-                                <span
-                                  className={`badge ${status.className}`}
-                                  title={account.runtime.lastError}
-                                >
-                                  {status.text}
-                                </span>
-                              </td>
-                              <td>
-                                <div>
-                                  {account.runtime.active}{' '}
-                                  <span
-                                    className="muted"
-                                    title={capabilityWarning(
-                                      account.capabilities,
-                                      account.concurrencyOverride
-                                    )}
-                                  >
-                                    / {account.maxConcurrency}
-                                    {account.concurrencyOverride != null
-                                      ? '（手动）'
-                                      : account.capabilities?.maxConcurrency == null
-                                        ? '（默认）'
-                                        : ''}
-                                  </span>
-                                </div>
-                                <div className="load-track">
-                                  <i
-                                    style={{
-                                      width: `${Math.min(account.runtime.active / Math.max(account.maxConcurrency, 1), 1) * 100}%`
-                                    }}
-                                  />
-                                </div>
-                              </td>
-                              <td
-                                className="quota-summary"
-                                title={
-                                  account.capabilities?.checkedAt
-                                    ? `更新于 ${new Date(account.capabilities.checkedAt).toLocaleString()}`
-                                    : '尚未同步'
-                                }
-                              >
-                                {account.provider === 'deepseek' ? (
-                                  <BalanceDetails capabilities={account.capabilities} compact />
-                                ) : (
-                                  <>
-                                    <span>
-                                      5 小时{' '}
-                                      {quotaRemaining(
-                                        account.capabilities?.quota?.fiveHour,
-                                        account.capabilities?.quota?.unit
-                                      )}
-                                    </span>
-                                    <small>
-                                      7 天{' '}
-                                      {quotaRemaining(
-                                        account.capabilities?.quota?.weekly,
-                                        account.capabilities?.quota?.unit
-                                      )}
-                                    </small>
-                                    {account.provider === 'opencode-go' && (
-                                      <small>
-                                        月{' '}
-                                        {quotaRemaining(
-                                          account.capabilities?.quota?.monthly,
-                                          'percent'
-                                        )}
-                                      </small>
-                                    )}
-                                  </>
-                                )}
-                              </td>
-                              <td>
-                                {account.runtime.successes}{' '}
-                                <span className="muted">/ {account.runtime.failures}</span>
-                              </td>
-                              <td>
-                                <div className="row-actions">
-                                  <button
-                                    className="icon-button"
-                                    title="同步上游信息"
-                                    aria-label={`同步 ${account.name}`}
-                                    disabled={busy || !account.hasCredential}
-                                    onClick={() =>
-                                      void action(
-                                        () => api.refreshAccount(account.id),
-                                        '上游信息已同步'
-                                      )
-                                    }
-                                  >
-                                    <RotateCcw size={14} />
-                                  </button>
-                                  <button
-                                    className="text-button"
-                                    disabled={busy}
-                                    onClick={() =>
-                                      void action(() =>
-                                        api.saveAccount({ ...account, enabled: !account.enabled })
-                                      )
-                                    }
-                                  >
-                                    {account.enabled ? '停用' : '启用'}
-                                  </button>
-                                  <button
-                                    className="text-button"
-                                    onClick={() => setAccountEdit({ ...account, secret: '' })}
-                                  >
-                                    编辑
-                                  </button>
-                                  {(account.runtime.authFailed ||
-                                    account.runtime.cooldownUntil > Date.now()) && (
-                                    <button
-                                      className="icon-button"
-                                      title="恢复调度"
-                                      aria-label={`恢复 ${account.name}`}
-                                      disabled={busy}
-                                      onClick={() =>
-                                        void action(() => api.resetAccount(account.id))
-                                      }
-                                    >
-                                      <RotateCcw size={14} />
-                                    </button>
-                                  )}
-                                  <button
-                                    className="icon-button danger"
-                                    aria-label={`删除 ${account.name}`}
-                                    onClick={() =>
-                                      setDeleting({
-                                        type: 'account',
-                                        id: account.id,
-                                        name: account.name
-                                      })
-                                    }
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-                              </td>
+                  ))}
+                </div>
+                {tab === 'accounts' && (
+                  <>
+                    <div className="section-toolbar">
+                      <span className="badge">并发与额度均衡 · 粘性会话优先</span>
+                      <button
+                        className="button primary"
+                        onClick={() => setAccountEdit(newAccount())}
+                      >
+                        <Plus size={15} />
+                        添加账号
+                      </button>
+                    </div>
+                    <div className="connection-strip">
+                      <div>
+                        <span className={`status-dot ${group.enabled ? 'on' : ''}`} />
+                        <code>{snapshot.baseUrl}/v1</code>
+                      </div>
+                      <div className="toolbar">
+                        <button className="text-button" onClick={() => copy('url')}>
+                          <Copy size={13} />
+                          地址
+                        </button>
+                        <button className="text-button" onClick={() => copy('registry')}>
+                          <Copy size={13} />
+                          复制 api.json 链接
+                        </button>
+                      </div>
+                    </div>
+                    {(snapshot.lanBaseUrls ?? []).map((baseUrl) => (
+                      <div className="connection-strip" key={baseUrl} aria-label="局域网连接">
+                        <div>
+                          <span
+                            className={`status-dot ${snapshot.running && group.enabled ? 'on' : ''}`}
+                          />
+                          <code>{baseUrl}/v1</code>
+                        </div>
+                        <div className="toolbar">
+                          <button
+                            className="text-button"
+                            onClick={() => copy('url', new URL(baseUrl).hostname)}
+                          >
+                            <Copy size={13} />
+                            地址
+                          </button>
+                          <button className="text-button" onClick={() => copy('key')}>
+                            <Copy size={13} />
+                            密钥
+                          </button>
+                          <button
+                            className="text-button"
+                            onClick={() => copy('registry', new URL(baseUrl).hostname)}
+                          >
+                            <Copy size={13} />
+                            复制 api.json 链接
+                          </button>
+                          <button
+                            className="text-button"
+                            disabled={busy}
+                            onClick={() => setRotatingKey(true)}
+                          >
+                            <RotateCcw size={13} />
+                            轮换密钥
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {snapshot.settings.lanSharing && !snapshot.lanBaseUrls?.length && (
+                      <p className="muted">未检测到局域网 IPv4 地址，请连接 Wi-Fi 或有线网络。</p>
+                    )}
+                    <details className="connection-help">
+                      <summary>如何接入客户端</summary>
+                      <p>
+                        Kimi Code：启动网关，复制「api.json 链接」，在「添加供应商 →
+                        注册表」中粘贴到 「注册表
+                        URL」。本机连接无需密钥；局域网连接需点击「密钥」复制并填入「API Key」。
+                        模型来自已启用且同步成功的账号；同一 URL 重复导入可刷新模型列表。
+                      </p>
+                      <p>
+                        本机客户端无需密钥（客户端要求填写时可填任意占位值），局域网客户端使用上方地址与网关密钥；Anthropic
+                        Base URL 去掉末尾 /v1。Kimi 默认模型为 kimi-for-coding；使用 DeepSeek
+                        时请将客户端模型改为同步列表中的 DeepSeek 模型。
+                      </p>
+                    </details>
+                    {!accounts.length ? (
+                      <div className="empty-state">
+                        <div className="empty-icon">
+                          <Users size={26} />
+                        </div>
+                        <h2>添加第一个账号</h2>
+                        <p>
+                          填写 Kimi Code、DeepSeek 或 OpenCode Go API Key 即可接入。
+                          <br />
+                          添加多个账号后，网关将自动均衡分配请求。
+                        </p>
+                        <button className="button" onClick={() => setAccountEdit(newAccount())}>
+                          <Plus size={15} />
+                          添加第一个账号
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="table-scroll">
+                        <table className="account-table">
+                          <thead>
+                            <tr>
+                              <th>账号</th>
+                              <th>状态</th>
+                              <th>并发</th>
+                              <th>额度 / 余额</th>
+                              <th>成功 / 失败</th>
+                              <th className="align-right">操作</th>
                             </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                          </thead>
+                          <tbody>
+                            {accounts.map((account) => {
+                              const status = accountStatus(account)
+                              return (
+                                <tr key={account.id}>
+                                  <td>
+                                    <div className="account-name">
+                                      <span className="account-avatar">
+                                        <ProviderLogo provider={account.provider} />
+                                      </span>
+                                      <div>
+                                        <strong>{account.name}</strong>
+                                        <small>
+                                          {account.provider === 'opencode-go'
+                                            ? 'OpenCode Go · 订阅'
+                                            : account.provider === 'deepseek'
+                                              ? 'DeepSeek · 按量付费'
+                                              : `Kimi · ${account.region === 'global' ? '国际区' : '中国区'}`}
+                                        </small>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <span
+                                      className={`badge ${status.className}`}
+                                      title={account.runtime.lastError}
+                                    >
+                                      {status.text}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <div>
+                                      {account.runtime.active}{' '}
+                                      <span
+                                        className="muted"
+                                        title={capabilityWarning(
+                                          account.capabilities,
+                                          account.concurrencyOverride
+                                        )}
+                                      >
+                                        / {account.maxConcurrency}
+                                        {account.concurrencyOverride != null
+                                          ? '（手动）'
+                                          : account.capabilities?.maxConcurrency == null
+                                            ? '（默认）'
+                                            : ''}
+                                      </span>
+                                    </div>
+                                    <div className="load-track">
+                                      <i
+                                        style={{
+                                          width: `${Math.min(account.runtime.active / Math.max(account.maxConcurrency, 1), 1) * 100}%`
+                                        }}
+                                      />
+                                    </div>
+                                  </td>
+                                  <td
+                                    className="quota-summary"
+                                    title={
+                                      account.capabilities?.checkedAt
+                                        ? `更新于 ${new Date(account.capabilities.checkedAt).toLocaleString()}`
+                                        : '尚未同步'
+                                    }
+                                  >
+                                    {account.provider === 'deepseek' ? (
+                                      <BalanceDetails capabilities={account.capabilities} compact />
+                                    ) : (
+                                      <>
+                                        <span>
+                                          5 小时{' '}
+                                          {quotaRemaining(
+                                            account.capabilities?.quota?.fiveHour,
+                                            account.capabilities?.quota?.unit
+                                          )}
+                                        </span>
+                                        <small>
+                                          7 天{' '}
+                                          {quotaRemaining(
+                                            account.capabilities?.quota?.weekly,
+                                            account.capabilities?.quota?.unit
+                                          )}
+                                        </small>
+                                        {account.provider === 'opencode-go' && (
+                                          <small>
+                                            月{' '}
+                                            {quotaRemaining(
+                                              account.capabilities?.quota?.monthly,
+                                              'percent'
+                                            )}
+                                          </small>
+                                        )}
+                                      </>
+                                    )}
+                                  </td>
+                                  <td>
+                                    {account.runtime.successes}{' '}
+                                    <span className="muted">/ {account.runtime.failures}</span>
+                                  </td>
+                                  <td>
+                                    <div className="row-actions">
+                                      <button
+                                        className="icon-button"
+                                        title="同步上游信息"
+                                        aria-label={`同步 ${account.name}`}
+                                        disabled={busy || !account.hasCredential}
+                                        onClick={() =>
+                                          void action(
+                                            () => api.refreshAccount(account.id),
+                                            '上游信息已同步'
+                                          )
+                                        }
+                                      >
+                                        <RotateCcw size={14} />
+                                      </button>
+                                      <button
+                                        className="text-button"
+                                        disabled={busy}
+                                        onClick={() =>
+                                          void action(() =>
+                                            api.saveAccount({
+                                              ...account,
+                                              enabled: !account.enabled
+                                            })
+                                          )
+                                        }
+                                      >
+                                        {account.enabled ? '停用' : '启用'}
+                                      </button>
+                                      <button
+                                        className="text-button"
+                                        onClick={() => setAccountEdit({ ...account, secret: '' })}
+                                      >
+                                        编辑
+                                      </button>
+                                      {(account.runtime.authFailed ||
+                                        account.runtime.cooldownUntil > Date.now()) && (
+                                        <button
+                                          className="icon-button"
+                                          title="恢复调度"
+                                          aria-label={`恢复 ${account.name}`}
+                                          disabled={busy}
+                                          onClick={() =>
+                                            void action(() => api.resetAccount(account.id))
+                                          }
+                                        >
+                                          <RotateCcw size={14} />
+                                        </button>
+                                      )}
+                                      <button
+                                        className="icon-button danger"
+                                        aria-label={`删除 ${account.name}`}
+                                        onClick={() =>
+                                          setDeleting({
+                                            type: 'account',
+                                            id: account.id,
+                                            name: account.name
+                                          })
+                                        }
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <div className="panel-footnote">
+                      <ShieldCheck size={13} />
+                      凭据加密保存 · 粘性会话优先 · 新会话按并发与剩余额度分配
+                    </div>
+                  </>
                 )}
-                <div className="panel-footnote">
-                  <ShieldCheck size={13} />
-                  凭据加密保存 · 粘性会话优先 · 新会话按并发与剩余额度分配
-                </div>
-              </>
-            )}
-            {tab === 'pricing' && <ModelPricing snapshot={snapshot} saved={setSnapshot} />}
-            {tab === 'activity' && (
-              <>
-                <div className="section-toolbar">
-                  <div>
-                    <h2>请求记录</h2>
-                    <p className="muted">永久保存在本机，每页 10 条；不记录提示词、回复或密钥。</p>
-                  </div>
-                  <span className="badge">共 {history?.total ?? snapshot.requests.length} 条</span>
-                </div>
-                {historyError && (
-                  <p className="form-error" role="alert">
-                    {historyError}
-                  </p>
+                {tab === 'pricing' && <ModelPricing snapshot={snapshot} saved={setSnapshot} />}
+                {tab === 'activity' && (
+                  <>
+                    <div className="section-toolbar">
+                      <div>
+                        <h2>请求记录</h2>
+                        <p className="muted">
+                          永久保存在本机，每页 10 条；不记录提示词、回复或密钥。
+                        </p>
+                      </div>
+                      <span className="badge">
+                        共 {history?.total ?? snapshot.requests.length} 条
+                      </span>
+                    </div>
+                    {historyError && (
+                      <p className="form-error" role="alert">
+                        {historyError}
+                      </p>
+                    )}
+                    {!(history?.records.length ?? snapshot.requests.length) ? (
+                      <div className="empty-state">
+                        <Activity size={30} />
+                        <h2>等待第一个请求</h2>
+                        <p>启动网关，将客户端接入网关地址后，请求记录会显示在这里。</p>
+                      </div>
+                    ) : (
+                      <div className="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>时间</th>
+                              <th>账号 / Request ID</th>
+                              <th>模型</th>
+                              <th title="客户端请求中指定的思考强度；未指定或旧记录显示 —">
+                                思考强度
+                              </th>
+                              <th>状态</th>
+                              <th title="从网关收到请求到首个文本、思考或工具调用输出，包含重试等待；非流式或未收到输出时为 —">
+                                首字耗时
+                              </th>
+                              <th>总耗时</th>
+                              <th>费用</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(history?.records ?? snapshot.requests).map((r) => (
+                              <tr key={r.id}>
+                                <td>{new Date(r.time).toLocaleString()}</td>
+                                <td>
+                                  {r.account || '未分配'}
+                                  {r.upstreamRequestId && (
+                                    <small className="request-id" title={r.upstreamRequestId}>
+                                      requestId: {r.upstreamRequestId}
+                                    </small>
+                                  )}
+                                </td>
+                                <td className="model-cell">{r.model || '模型列表'}</td>
+                                <td>{r.reasoningEffort ?? '—'}</td>
+                                <td>
+                                  <span
+                                    className={`badge ${r.status < 400 ? 'healthy' : 'danger'}`}
+                                  >
+                                    {r.status}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="latency-value">
+                                    {formatLatency(r.firstTokenMs)}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="latency-value">
+                                    {formatLatency(r.durationMs)}
+                                  </span>
+                                </td>
+                                <td>
+                                  <RequestCostCell record={r} snapshot={snapshot} />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <div className="section-toolbar">
+                      <button
+                        className="button"
+                        disabled={historyLoading || historyCursors.length === 1}
+                        onClick={() => setHistoryCursors((c) => c.slice(0, -1))}
+                      >
+                        上一页
+                      </button>
+                      <span className="muted">第 {historyCursors.length} 页</span>
+                      <button
+                        className="button"
+                        disabled={historyLoading || !history?.nextCursor}
+                        onClick={() => setHistoryCursors((c) => [...c, history!.nextCursor!])}
+                      >
+                        下一页
+                      </button>
+                    </div>
+                  </>
                 )}
-                {!(history?.records.length ?? snapshot.requests.length) ? (
-                  <div className="empty-state">
-                    <Activity size={30} />
-                    <h2>等待第一个请求</h2>
-                    <p>启动网关，将客户端接入网关地址后，请求记录会显示在这里。</p>
-                  </div>
-                ) : (
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>时间</th>
-                          <th>账号 / Request ID</th>
-                          <th>模型</th>
-                          <th title="客户端请求中指定的思考强度；未指定或旧记录显示 —">思考强度</th>
-                          <th>状态</th>
-                          <th title="从网关收到请求到首个文本、思考或工具调用输出，包含重试等待；非流式或未收到输出时为 —">
-                            首字耗时
-                          </th>
-                          <th>总耗时</th>
-                          <th>费用</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(history?.records ?? snapshot.requests).map((r) => (
-                          <tr key={r.id}>
-                            <td>{new Date(r.time).toLocaleString()}</td>
-                            <td>
-                              {r.account || '未分配'}
-                              {r.upstreamRequestId && (
-                                <small className="request-id" title={r.upstreamRequestId}>
-                                  requestId: {r.upstreamRequestId}
-                                </small>
-                              )}
-                            </td>
-                            <td className="model-cell">{r.model || '模型列表'}</td>
-                            <td>{r.reasoningEffort ?? '—'}</td>
-                            <td>
-                              <span className={`badge ${r.status < 400 ? 'healthy' : 'danger'}`}>
-                                {r.status}
-                              </span>
-                            </td>
-                            <td>
-                              <span className="latency-value">{formatLatency(r.firstTokenMs)}</span>
-                            </td>
-                            <td>
-                              <span className="latency-value">{formatLatency(r.durationMs)}</span>
-                            </td>
-                            <td>
-                              <RequestCostCell record={r} snapshot={snapshot} />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                <div className="section-toolbar">
-                  <button
-                    className="button"
-                    disabled={historyLoading || historyCursors.length === 1}
-                    onClick={() => setHistoryCursors((c) => c.slice(0, -1))}
-                  >
-                    上一页
-                  </button>
-                  <span className="muted">第 {historyCursors.length} 页</span>
-                  <button
-                    className="button"
-                    disabled={historyLoading || !history?.nextCursor}
-                    onClick={() => setHistoryCursors((c) => [...c, history!.nextCursor!])}
-                  >
-                    下一页
-                  </button>
-                </div>
-              </>
-            )}
+              </div>
+              <p className="workspace-note">
+                {snapshot.settings.lanSharing ? '局域网共享已开启' : '仅监听本机'} · OpenAI /
+                Anthropic 兼容 · 关闭窗口后 macOS 仍可保持网关运行，退出应用时停止
+              </p>
+            </section>
+            <section
+              hidden={settingsSection !== 'gateway'}
+              aria-label="网关设置"
+              className="settings-pane"
+            >
+              <h2>网关设置</h2>
+              <p className="settings-description">配置连接方式与请求策略，保存后生效。</p>
+              <SettingsEditor
+                input={snapshot.settings}
+                running={snapshot.running}
+                saved={(data) => {
+                  setSnapshot(data)
+                  setNotice('网关设置已保存')
+                }}
+              />
+            </section>
+            <section
+              hidden={settingsSection !== 'dashboard'}
+              aria-label="远程仪表盘"
+              className="settings-pane"
+            >
+              <DashboardSettings />
+            </section>
           </div>
-          <p className="workspace-note">
-            {snapshot.settings.lanSharing ? '局域网共享已开启' : '仅监听本机'} · OpenAI / Anthropic
-            兼容 · 关闭窗口后 macOS 仍可保持网关运行，退出应用时停止
-          </p>
-        </section>
+        </div>
       )}
       {accountEdit && (
         <AccountEditor
@@ -1571,17 +1657,6 @@ export function GatewayPanel({
             setSnapshot(data)
             setAccountEdit(undefined)
             setNotice('账号已保存')
-          }}
-        />
-      )}
-      {settingsEdit && (
-        <SettingsEditor
-          input={settingsEdit}
-          running={snapshot.running}
-          close={() => setSettingsEdit(undefined)}
-          saved={(data) => {
-            setSnapshot(data)
-            setSettingsEdit(undefined)
           }}
         />
       )}
@@ -1991,12 +2066,10 @@ function AccountEditor({
 function SettingsEditor({
   input,
   running,
-  close,
   saved
 }: {
   input: GatewaySettings
   running: boolean
-  close: () => void
   saved: (data: GatewaySnapshot) => void
 }) {
   const [draft, setDraft] = useState(input),
@@ -2017,101 +2090,106 @@ function SettingsEditor({
     }
   }
   return (
-    <Modal title="网关设置" close={close}>
+    <>
       <form onSubmit={(e) => void submit(e)}>
         <fieldset disabled={busy}>
-          <Field
-            label="监听端口"
-            hint={
-              running
-                ? '更改端口前请先停止网关。'
-                : '默认仅本机可用；开启局域网共享后，同一网络的设备也可使用网关密钥接入。'
-            }
-          >
-            <input
-              type="number"
-              min={1024}
-              max={65535}
-              required
-              disabled={running}
-              value={draft.port}
-              onChange={(e) => setDraft({ ...draft, port: e.target.valueAsNumber })}
-            />
-          </Field>
-          <Field
-            label="局域网共享"
-            hint={
-              running
-                ? '切换共享前请先停止网关，保存后重新启动。'
-                : '保留本机地址，并增加局域网地址；其他设备需要网关密钥才能访问。'
-            }
-          >
-            <input
-              type="checkbox"
-              disabled={running}
+          <section className="settings-group">
+            <h3>连接与访问</h3>
+            <Field
+              label="监听端口"
+              hint={
+                running
+                  ? '更改端口前请先停止网关。'
+                  : '默认仅本机可用；开启局域网共享后，同一网络的设备也可使用网关密钥接入。'
+              }
+            >
+              <input
+                type="number"
+                min={1024}
+                max={65535}
+                required
+                disabled={running}
+                value={draft.port}
+                onChange={(e) => setDraft({ ...draft, port: e.target.valueAsNumber })}
+              />
+            </Field>
+            <SettingsToggle
+              label="局域网共享"
+              hint={
+                running
+                  ? '切换共享前请先停止网关，保存后重新启动。'
+                  : '同一网络的设备可通过网关密钥接入。'
+              }
               checked={draft.lanSharing ?? false}
-              onChange={(e) => {
-                if (e.target.checked) setConfirmLanSharing(true)
+              disabled={running}
+              onChange={(checked) => {
+                if (checked) setConfirmLanSharing(true)
                 else setDraft({ ...draft, lanSharing: false })
               }}
             />
-          </Field>
-          <div className="form-grid">
-            <Field label="请求总超时（秒）">
-              <input
-                type="number"
-                min={5}
-                max={1800}
-                required
-                value={draft.timeoutSeconds}
-                onChange={(e) => setDraft({ ...draft, timeoutSeconds: e.target.valueAsNumber })}
-              />
-            </Field>
-            <Field label="最大尝试次数" hint="包含首次请求；同一请求不重复尝试同一账号。">
-              <input
-                type="number"
-                min={1}
-                max={10}
-                required
-                value={draft.maxAttempts}
-                onChange={(e) => setDraft({ ...draft, maxAttempts: e.target.valueAsNumber })}
-              />
-            </Field>
-          </div>
-          <Field
-            label="会话保持（秒）"
-            hint="默认 300 秒；0 表示关闭。优先复用同一账号以保留缓存命中。"
-          >
-            <input
-              type="number"
-              min={0}
-              max={86400}
-              required
-              value={draft.stickySeconds ?? 300}
-              onChange={(e) => setDraft({ ...draft, stickySeconds: e.target.valueAsNumber })}
-            />
-          </Field>
-          <Field
-            label="失败冷却（秒）"
-            hint="限流时尊重上游更长的 Retry-After；401/403 暂停账号，需更新凭据或手动恢复。"
-          >
-            <input
-              type="number"
-              min={1}
-              max={3600}
-              required
-              value={draft.cooldownSeconds}
-              onChange={(e) => setDraft({ ...draft, cooldownSeconds: e.target.valueAsNumber })}
-            />
-          </Field>
-          <label className="check-label">
-            <input
-              type="checkbox"
+          </section>
+          <section className="settings-group">
+            <h3>请求策略</h3>
+            <div className="form-grid">
+              <Field label="请求总超时（秒）">
+                <input
+                  type="number"
+                  min={5}
+                  max={1800}
+                  required
+                  value={draft.timeoutSeconds}
+                  onChange={(e) => setDraft({ ...draft, timeoutSeconds: e.target.valueAsNumber })}
+                />
+              </Field>
+              <Field label="最大尝试次数" hint="包含首次请求；同一请求不重复尝试同一账号。">
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  required
+                  value={draft.maxAttempts}
+                  onChange={(e) => setDraft({ ...draft, maxAttempts: e.target.valueAsNumber })}
+                />
+              </Field>
+            </div>
+            <div className="form-grid">
+              <Field
+                label="会话保持（秒）"
+                hint="默认 300 秒；0 表示关闭。优先复用同一账号以保留缓存命中。"
+              >
+                <input
+                  type="number"
+                  min={0}
+                  max={86400}
+                  required
+                  value={draft.stickySeconds ?? 300}
+                  onChange={(e) => setDraft({ ...draft, stickySeconds: e.target.valueAsNumber })}
+                />
+              </Field>
+              <Field
+                label="失败冷却（秒）"
+                hint="限流时尊重上游更长的 Retry-After；401/403 暂停账号，需更新凭据或手动恢复。"
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  required
+                  value={draft.cooldownSeconds}
+                  onChange={(e) => setDraft({ ...draft, cooldownSeconds: e.target.valueAsNumber })}
+                />
+              </Field>
+            </div>
+          </section>
+          <section className="settings-group">
+            <h3>启动行为</h3>
+            <SettingsToggle
+              label="打开应用时自动启动网关"
+              hint="启动 Navo 后自动恢复网关服务。"
               checked={draft.autoStart}
-              onChange={(e) => setDraft({ ...draft, autoStart: e.target.checked })}
+              onChange={(checked) => setDraft({ ...draft, autoStart: checked })}
             />
-            打开应用时自动启动网关
-          </label>
+          </section>
         </fieldset>
         {error && (
           <p className="form-error" role="alert">
@@ -2119,8 +2197,16 @@ function SettingsEditor({
           </p>
         )}
         <div className="modal-actions">
-          <button className="button" type="button" onClick={close}>
-            取消
+          <button
+            className="button"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setDraft(input)
+              setError('')
+            }}
+          >
+            重置修改
           </button>
           <button className="button primary" disabled={busy}>
             保存设置
@@ -2149,7 +2235,7 @@ function SettingsEditor({
           </div>
         </Modal>
       )}
-    </Modal>
+    </>
   )
 }
 

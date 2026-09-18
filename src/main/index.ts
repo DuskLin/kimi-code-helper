@@ -223,10 +223,17 @@ void app
     handle(IPC.dashboardSave, (value) => dashboard!.save(value))
     handle(IPC.dashboardRotate, () => dashboard!.rotate())
     handle(IPC.dashboardCopyCode, () => clipboard.writeText(dashboard!.accessCode()))
-    handle(IPC.dashboardCopyUrl, () => {
-      const url = dashboard!.state().publicUrl
-      if (!url) throw new Error('公网链接尚未生成')
-      clipboard.writeText(url)
+    handle(IPC.dashboardCopyUrl, (lanUrl) => {
+      const state = dashboard!.state()
+      if (lanUrl !== undefined) {
+        if (typeof lanUrl !== 'string' || !state.lanUrls.includes(lanUrl)) {
+          throw new Error('局域网地址已失效，请刷新后重试')
+        }
+        clipboard.writeText(lanUrl)
+        return
+      }
+      if (!state.publicUrl) throw new Error('公网链接尚未生成')
+      clipboard.writeText(state.publicUrl)
     })
     handle(IPC.dashboardCheckPublic, () => dashboard!.checkPublic())
     handle(IPC.dashboardOpen, () => shell.openExternal(dashboard!.state().localUrl))

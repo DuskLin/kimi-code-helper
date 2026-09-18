@@ -17,7 +17,7 @@ export function App() {
   })
   function changePage(next: GatewayPage) {
     setPage(next)
-    if (next !== 'management') {
+    if (next !== 'settings') {
       try {
         localStorage.setItem(viewStorageKey, next)
       } catch {

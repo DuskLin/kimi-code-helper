@@ -2206,15 +2206,6 @@ textarea {
   }
 }
 
-.dashboard-settings-modal {
-  width: min(680px, calc(100vw - 32px));
-}
-.dashboard-settings-modal .modal-heading {
-  padding-bottom: 18px;
-}
-.dashboard-settings-modal .modal-scroll-body {
-  padding-bottom: 20px;
-}
 .dashboard-settings-content {
   display: grid;
   gap: 20px;
@@ -2266,7 +2257,7 @@ textarea {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
-.dashboard-toggle-row {
+.settings-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2277,20 +2268,20 @@ textarea {
   background: var(--background);
   cursor: pointer;
 }
-.dashboard-toggle-row > span {
+.settings-toggle-row > span {
   min-width: 0;
   display: grid;
   gap: 4px;
 }
-.dashboard-toggle-row strong {
+.settings-toggle-row strong {
   font-size: 12px;
   font-weight: 500;
 }
-.dashboard-toggle-row small {
+.settings-toggle-row small {
   font-size: 10px;
   color: var(--muted);
 }
-.dashboard-toggle-row input[role='switch'] {
+.settings-toggle-row input[role='switch'] {
   appearance: none;
   -webkit-appearance: none;
   width: 30px;
@@ -2303,7 +2294,7 @@ textarea {
   cursor: pointer;
   position: relative;
 }
-.dashboard-toggle-row input[role='switch']::after {
+.settings-toggle-row input[role='switch']::after {
   content: '';
   position: absolute;
   width: 12px;
@@ -2311,15 +2302,15 @@ textarea {
   left: 2px;
   top: 2px;
   border-radius: 50%;
-  background: var(--surface);
+  background: #fff;
   box-shadow: 0 1px 3px #0002;
   transition: transform 0.15s;
 }
-.dashboard-toggle-row input[role='switch']:checked {
+.settings-toggle-row input[role='switch']:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
-.dashboard-toggle-row input[role='switch']:checked::after {
+.settings-toggle-row input[role='switch']:checked::after {
   transform: translateX(12px);
 }
 .dashboard-field-grid {
@@ -2328,15 +2319,15 @@ textarea {
   gap: 12px;
   margin-top: 12px;
 }
-.dashboard-settings-modal .field {
+.dashboard-settings-page .field {
   margin-bottom: 0;
   font-size: 11px;
 }
-.dashboard-settings-modal .field > span {
+.dashboard-settings-page .field > span {
   color: var(--muted);
 }
-.dashboard-settings-modal .field input,
-.dashboard-settings-modal .field select {
+.dashboard-settings-page .field input,
+.dashboard-settings-page .field select {
   width: 100%;
   min-width: 0;
   height: 35px;
@@ -2379,6 +2370,7 @@ textarea {
   user-select: text;
 }
 .dashboard-address-list {
+  grid-column: 2 / -1;
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -2489,16 +2481,13 @@ textarea {
   margin: 8px 0 0;
 }
 @media (max-width: 650px) {
-  .dashboard-settings-modal {
-    width: calc(100vw - 24px);
-  }
   .dashboard-toggle-grid {
     gap: 8px;
   }
-  .dashboard-toggle-row {
+  .settings-toggle-row {
     padding: 10px;
   }
-  .dashboard-toggle-row small {
+  .settings-toggle-row small {
     font-size: 9px;
   }
   .dashboard-field-grid {
@@ -2506,5 +2495,206 @@ textarea {
   }
   .dashboard-dialog-footer {
     padding: 12px 20px;
+  }
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.settings-sidebar {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 6px;
+}
+.settings-sidebar h1 {
+  margin: 8px 12px 18px;
+  font-size: 20px;
+}
+.settings-sidebar button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  color: var(--muted);
+}
+.settings-sidebar button:hover {
+  background: var(--control-background);
+  color: var(--text);
+}
+.settings-sidebar button.selected {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.settings-content {
+  min-width: 0;
+}
+.settings-content h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.settings-pane {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.settings-content [hidden] {
+  display: none;
+}
+.settings-pane .card-display-options {
+  margin-top: 24px;
+}
+.dashboard-settings-page .dashboard-dialog-footer {
+  margin-top: 24px;
+  padding: 18px 0 0;
+}
+@media (max-width: 900px) {
+  .settings-layout {
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 16px;
+  }
+  .settings-pane {
+    padding: 18px;
+  }
+}
+
+/* Shared settings controls and form sections. */
+.settings-content fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.settings-description {
+  margin: 0 0 28px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.settings-group + .settings-group {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.settings-group h3,
+.settings-content .dashboard-section h3 {
+  margin: 0 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-content .dashboard-section-heading h3 {
+  margin: 0;
+}
+.settings-content .field > span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+.settings-content .field small,
+.settings-toggle-row small {
+  font-size: 11px;
+  line-height: 1.65;
+}
+.settings-content .field input:not([type='checkbox']),
+.settings-content .field select {
+  height: 38px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.settings-content input:focus-visible,
+.settings-content select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-toggle-row {
+  padding: 16px;
+  gap: 18px;
+  min-height: 72px;
+}
+.settings-toggle-row strong {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-toggle-row:has(input:disabled) {
+  cursor: default;
+}
+.settings-toggle-row input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.settings-toggle-row input[role='switch'] {
+  flex-shrink: 0;
+}
+.settings-content .card-display-options {
+  display: grid;
+  gap: 12px;
+}
+.settings-content .card-display-options label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.settings-content .button {
+  min-height: 36px;
+  border-radius: 8px;
+}
+.settings-accounts .content-panel {
+  box-shadow: none;
+}
+@media (max-width: 760px) {
+  .settings-content .form-grid,
+  .settings-content .dashboard-toggle-grid,
+  .settings-content .dashboard-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-content .dashboard-dialog-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+.dashboard-lan-address {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.dashboard-enable-toggle.settings-toggle-row {
+  min-height: 30px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  gap: 10px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .dashboard-settings-header {
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .dashboard-settings-header .settings-description {
+    margin-bottom: 0;
   }
 }
