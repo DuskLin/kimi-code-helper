@@ -6,10 +6,10 @@ export interface RequestCost {
   source: 'reported' | 'estimated' | 'unknown'
   note: string
 }
-export function requestCost(
-  record: RequestRecord,
-  snapshot: Pick<GatewaySnapshot, 'accounts' | 'modelPrices' | 'modelPriceCatalog'>
-): RequestCost {
+export type RequestPricing = Pick<GatewaySnapshot, 'modelPrices' | 'modelPriceCatalog'> & {
+  accounts: Pick<GatewaySnapshot['accounts'][number], 'id' | 'provider'>[]
+}
+export function requestCost(record: RequestRecord, snapshot: RequestPricing): RequestCost {
   const unknown = (note: string): RequestCost => ({ amounts: [], source: 'unknown', note })
   const usage = record.usage
   if (usage?.cost != null && Number.isFinite(usage.cost) && usage.cost >= 0)
@@ -52,10 +52,7 @@ export function requestCost(
   }
 }
 
-export function requestCostDetails(
-  record: RequestRecord,
-  snapshot: Pick<GatewaySnapshot, 'accounts' | 'modelPrices' | 'modelPriceCatalog'>
-) {
+export function requestCostDetails(record: RequestRecord, snapshot: RequestPricing) {
   const account = snapshot.accounts.find((a) => a.id === record.accountId)
   const provider = record.provider ?? (account ? (account.provider ?? 'kimi') : undefined)
   const manual = snapshot.modelPrices.find(

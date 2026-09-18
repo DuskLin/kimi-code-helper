@@ -8,6 +8,148 @@ import {
 import { convertResponse } from '../src/main/services/protocol-response'
 import type { UsageProtocol } from '../src/shared/usage'
 
+test('audit: failed Chat finish reasons never become successful Responses or Messages', async () => {
+  for (const reason of ['aborted', 'insufficient_system_resource']) {
+    const root = { choices: [{ message: { content: 'partial' }, finish_reason: reason }] }
+    for (const target of ['responses', 'messages'] as const) {
+      await assert.rejects(translate('chat-completions', target, root), /上游生成中断/)
+      const events = await translate(
+        'chat-completions',
+        target,
+        event({ choices: [{ delta: { content: 'partial' }, finish_reason: reason }] }) +
+          'data: [DONE]\n\n',
+        true
+      )
+      assert.ok(events.some((e: Wire) => e.type === 'response.failed' || e.type === 'error'))
+      assert.ok(
+        !events.some((e: Wire) => e.type === 'response.completed' || e.type === 'message_stop')
+      )
+    }
+  }
+})
+
+test('audit: truncated tool arguments preserve token-limit semantics for JSON and SSE', async () => {
+  const argumentsText = '{"path":"partial'
+  const chat = {
+    choices: [
+      {
+        message: {
+          tool_calls: [{ id: 'c', function: { name: 'read', arguments: argumentsText } }]
+        },
+        finish_reason: 'length'
+      }
+    ]
+  }
+  const chatStream =
+    event({
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              { index: 0, id: 'c', function: { name: 'read', arguments: argumentsText } }
+            ]
+          },
+          finish_reason: null
+        }
+      ]
+    }) +
+    event({ choices: [{ delta: {}, finish_reason: 'length' }] }) +
+    'data: [DONE]\n\n'
+  const messagesStream =
+    event({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'tool_use', id: 'c', name: 'read', input: {} }
+    }) +
+    event({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'input_json_delta', partial_json: argumentsText }
+    }) +
+    event({ type: 'content_block_stop', index: 0 }) +
+    event({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }) +
+    event({ type: 'message_stop' })
+  for (const [source, input] of [
+    ['chat-completions', chat],
+    ['chat-completions', chatStream],
+    ['messages', messagesStream]
+  ] as const) {
+    const response = await translate(source, 'responses', input)
+    assert.equal(response.status, 'incomplete')
+    assert.equal(response.incomplete_details.reason, 'max_output_tokens')
+    assert.equal(response.output[0].status, 'incomplete')
+    assert.equal(response.output[0].arguments, argumentsText)
+    const stream = await translate(source, 'responses', input, true)
+    assert.equal(stream.at(-1).type, 'response.incomplete')
+  }
+  for (const input of [chat, chatStream]) {
+    const response = await translate('chat-completions', 'messages', input)
+    assert.equal(response.stop_reason, 'max_tokens')
+    assert.deepEqual(response.content, [])
+    const events = await translate('chat-completions', 'messages', input, true)
+    assert.equal(
+      events.find((e: Wire) => e.type === 'message_delta').delta.stop_reason,
+      'max_tokens'
+    )
+    assert.ok(!events.some((e: Wire) => e.content_block?.type === 'tool_use'))
+  }
+  await assert.rejects(
+    translate('chat-completions', 'responses', {
+      ...chat,
+      choices: [{ ...chat.choices[0], finish_reason: 'tool_calls' }]
+    }),
+    /JSON/
+  )
+})
+
+test('audit: empty and custom truncated calls are incomplete, while malformed complete input is rejected', async () => {
+  const context: BridgeContext = {
+    model: 'm',
+    tools: new Map([['patch', { name: 'patch', custom: true }]])
+  }
+  const reply = (argumentsText: string) => ({
+    choices: [
+      {
+        message: {
+          tool_calls: [{ id: 'c', function: { name: 'patch', arguments: argumentsText } }]
+        },
+        finish_reason: 'length'
+      }
+    ]
+  })
+  for (const argumentsText of ['', '{"input":"partial']) {
+    const events = await translate(
+      'chat-completions',
+      'responses',
+      reply(argumentsText),
+      true,
+      context
+    )
+    assert.equal(events.at(-1).type, 'response.incomplete')
+    assert.equal(events.at(-1).response.output[0].status, 'incomplete')
+    assert.ok(!events.some((e: Wire) => e.type === 'response.custom_tool_call_input.done'))
+  }
+  await assert.rejects(
+    translate('chat-completions', 'responses', reply('{"wrong":true}'), false, context),
+    /input/
+  )
+  const events = await translate(
+    'chat-completions',
+    'responses',
+    event({
+      choices: [
+        {
+          delta: { tool_calls: [{ index: 0, id: 'c', function: { arguments: '{' } }] },
+          finish_reason: 'length'
+        }
+      ]
+    }) + 'data: [DONE]\n\n',
+    true
+  )
+  assert.equal(events.at(-1).type, 'response.incomplete')
+  assert.deepEqual(events.at(-1).response.output, [])
+})
+
 const event = (value: Wire) => `data: ${JSON.stringify(value)}\n\n`
 async function translate(
   source: UsageProtocol,

@@ -122,6 +122,7 @@ export class Gateway {
   readonly history: RequestHistory
   private refreshTimer?: ReturnType<typeof setInterval>
   private refreshWork?: Promise<void>
+  private refreshController?: AbortController
   constructor(
     readonly store: GatewayStore,
     private readonly request: typeof fetch = fetch,
@@ -260,13 +261,14 @@ export class Gateway {
   private async stop(): Promise<void> {
     clearInterval(this.refreshTimer)
     this.refreshTimer = undefined
+    this.refreshController?.abort(new Error('网关已停止'))
     const server = this.server
-    if (!server) return
     for (const controller of this.controllers) controller.abort(new Error('网关已停止'))
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve())
-      server.closeAllConnections()
-    })
+    if (server)
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve())
+        server.closeAllConnections()
+      })
     this.server = undefined
     await Promise.allSettled([...this.activeRequests])
     await this.refreshWork
@@ -324,7 +326,7 @@ export class Gateway {
     if (!key || /[\s\x00-\x1f\x7f]/.test(key)) throw new Error('请填写有效的 API Key')
     return this.capabilities.get(input.region as Region, key, false, provider)
   }
-  async refreshAccount(value: unknown): Promise<GatewaySnapshot> {
+  async refreshAccount(value: unknown, signal?: AbortSignal): Promise<GatewaySnapshot> {
     const id = string(value, '账号 ID')
     const old = this.store.get().accounts.find((a) => a.id === id)
     if (!old?.credential.accessToken) throw new Error('请先填写 API Key')
@@ -332,9 +334,12 @@ export class Gateway {
       old.region,
       old.credential.accessToken,
       true,
-      old.provider
+      old.provider,
+      signal
     )
+    signal?.throwIfAborted()
     await this.store.mutate((data) => {
+      signal?.throwIfAborted()
       const account = data.accounts.find((a) => a.id === id)
       if (
         !account ||
@@ -369,14 +374,17 @@ export class Gateway {
   }
   refreshStaleAccounts(): Promise<void> {
     if (!this.refreshWork) {
-      this.refreshWork = this.refreshBatch().finally(() => {
+      this.refreshController = new AbortController()
+      this.refreshWork = this.refreshBatch(this.refreshController.signal).finally(() => {
         this.refreshWork = undefined
+        this.refreshController = undefined
       })
     }
     return this.refreshWork
   }
-  private async refreshBatch(): Promise<void> {
+  private async refreshBatch(signal: AbortSignal): Promise<void> {
     for (const account of this.store.get().accounts) {
+      if (signal.aborted) return
       if (
         !account.enabled ||
         !account.credential.accessToken ||
@@ -386,8 +394,9 @@ export class Gateway {
       )
         continue
       try {
-        await this.refreshAccount(account.id)
+        await this.refreshAccount(account.id, signal)
       } catch (error) {
+        if (signal.aborted) return
         this.scheduler.state(account.id).lastError =
           error instanceof Error ? error.message : '上游信息同步失败'
       }
@@ -459,6 +468,7 @@ export class Gateway {
       model = ''
     let finalStatus = 500
     let isRegistry = false
+    let authorized = false
     const disconnect = (): void => {
       if (!res.writableFinished && !controller.signal.aborted && !upstreamStreamFailed) {
         disconnected = true
@@ -515,6 +525,7 @@ export class Gateway {
       if (!group) throw new HttpError(401, '分组密钥无效或与接入地址不匹配')
       groupName = '统一账号池'
       if (!group.enabled) throw new HttpError(403, '该分组已停用')
+      authorized = true
       if (isModels) {
         if (isRegistry) await this.pricing.refresh()
         const accounts = data.accounts.filter(
@@ -899,7 +910,8 @@ export class Gateway {
       req.off('aborted', disconnect)
       res.off('close', disconnect)
       if (!req.complete) req.resume()
-      if (!isRegistry) {
+      // Rejected network traffic must not grow the permanent business history.
+      if (authorized && !isRegistry) {
         const record: RequestRecord = {
           id: randomUUID(),
           time: started,

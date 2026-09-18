@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { StringDecoder } from 'node:string_decoder'
+import { generationFailure } from '../../shared/upstream-status'
 import { parseUsage, type TokenUsage, type UsageProtocol } from '../../shared/usage'
 import { obj, list, str, ProtocolError, type Wire, type BridgeContext } from './protocol-request'
 
@@ -12,6 +13,7 @@ interface Block {
   value: string
   signature: string
   closed: boolean
+  truncated: boolean
 }
 const uid = (prefix: string) => `${prefix}_${randomUUID().replaceAll('-', '')}`
 const badResponse = () => new ProtocolError('上游协议响应无效或缺少完整结束事件', 502)
@@ -132,7 +134,11 @@ class ResponseBridge {
       throw new ProtocolError('上游工具参数不是有效 JSON 对象', 502)
     }
   }
-  private responseItem(b: Block, status = 'completed', empty = false): Wire {
+  private responseItem(
+    b: Block,
+    status = b.truncated ? 'incomplete' : 'completed',
+    empty = false
+  ): Wire {
     if (b.kind === 'tool') {
       const identity = this.context.tools.get(b.name)
       const base = {
@@ -143,7 +149,11 @@ class ResponseBridge {
         status
       }
       return this.custom(b)
-        ? { ...base, type: 'custom_tool_call', input: empty ? '' : str(this.toolInput(b).input) }
+        ? {
+            ...base,
+            type: 'custom_tool_call',
+            input: empty || b.truncated ? '' : str(this.toolInput(b).input)
+          }
         : { ...base, type: 'function_call', arguments: empty ? '' : b.value || '{}' }
     }
     if (b.kind === 'thinking')
@@ -192,7 +202,8 @@ class ResponseBridge {
       name: str(metadata.name),
       value: '',
       signature: '',
-      closed: false
+      closed: false,
+      truncated: false
     }
     this.blocks.push(block)
     this.retain(block.name + block.callId)
@@ -314,9 +325,29 @@ class ResponseBridge {
   }
   private close(block: Block): void {
     if (block.closed) return
-    if (block.kind === 'tool') this.toolInput(block)
+    if (block.kind === 'tool') {
+      if (this.reason === 'length') {
+        try {
+          JSON.parse(block.value)
+        } catch {
+          block.truncated = true
+        }
+      }
+      if (!block.truncated) this.toolInput(block)
+    }
     block.closed = true
     const index = this.blocks.indexOf(block)
+    if (block.truncated) {
+      // Never fabricate valid tool input for a cut-off call. Messages requires an
+      // object, so omit that block and report max_tokens; Responses can retain
+      // partial arguments on an explicitly incomplete item.
+      if (this.target === 'responses')
+        this.event('response.output_item.done', {
+          output_index: index,
+          item: this.responseItem(block)
+        })
+      return
+    }
     if (this.target === 'messages') {
       if (block.kind === 'tool') {
         const index = this.openMessage(block)
@@ -388,7 +419,10 @@ class ResponseBridge {
   }
   private finish(reason = this.reason): void {
     if (this.finished) return
-    if (this.pendingTools.size) throw new ProtocolError('上游工具调用缺少名称', 502)
+    if (this.pendingTools.size) {
+      if (reason !== 'length') throw new ProtocolError('上游工具调用缺少名称', 502)
+      this.pendingTools.clear()
+    }
     this.reason = reason
     this.start()
     for (const block of this.blocks) this.close(block)
@@ -411,7 +445,7 @@ class ResponseBridge {
   private stopReason(): string {
     return this.reason === 'length'
       ? 'max_tokens'
-      : this.blocks.some((b) => b.kind === 'tool')
+      : this.blocks.some((b) => b.kind === 'tool' && !b.truncated)
         ? 'tool_use'
         : this.reason === 'stop_sequence'
           ? 'stop_sequence'
@@ -456,7 +490,7 @@ class ResponseBridge {
       throw new ProtocolError('上游返回无法转换的输出类型', 502)
     if (item.type === 'function_call') {
       const b = this.block(key, 'tool', { callId: item.call_id, name: item.name })
-      this.reconcile(b, str(item.arguments) || '{}')
+      this.reconcile(b, str(item.arguments))
       return
     }
     if (item.type === 'reasoning') {
@@ -474,6 +508,11 @@ class ResponseBridge {
   }
   readJSON(root: Wire, source: UsageProtocol): void {
     this.metadata(root, source)
+    const failure = generationFailure(root)
+    if (failure) {
+      this.error(`上游生成中断 (${failure})`)
+      return
+    }
     if (root.error || root.type === 'error' || root.status === 'failed') {
       this.error(str(obj(root.error).message) || '上游返回错误')
       return
@@ -498,7 +537,7 @@ class ResponseBridge {
       for (const [index, tool] of list(message.tool_calls).entries())
         this.append(
           this.block(`tool:${index}`, 'tool', { callId: tool.id, name: obj(tool.function).name }),
-          str(obj(tool.function).arguments) || '{}'
+          str(obj(tool.function).arguments)
         )
       this.finish(str(choice.finish_reason) || 'stop')
     } else if (source === 'messages') {
@@ -519,7 +558,7 @@ class ResponseBridge {
             ? JSON.stringify(block.input ?? {})
             : str(block.text ?? block.thinking)
         )
-        this.close(b)
+        if (b.kind !== 'tool') this.close(b)
       }
       this.finish(
         root.stop_reason === 'max_tokens'
@@ -548,6 +587,11 @@ class ResponseBridge {
   readEvent(root: Wire, event: string, source: UsageProtocol): void {
     if (this.finished) return
     this.metadata(root, source)
+    const failure = generationFailure(root)
+    if (failure) {
+      this.error(`上游生成中断 (${failure})`)
+      return
+    }
     const type = str(root.type) || event
     if (root.error || type === 'error' || type === 'response.failed') {
       this.error(str(obj(root.error ?? obj(root.response).error).message) || '上游返回错误')
@@ -623,7 +667,7 @@ class ResponseBridge {
         } else this.append(b, str(delta.text ?? delta.thinking ?? delta.partial_json))
       } else if (type === 'content_block_stop') {
         const b = this.blocks.find((b) => b.key === String(root.index))
-        if (b) this.close(b)
+        if (b && b.kind !== 'tool') this.close(b)
       } else if (type === 'message_delta') {
         const reason = obj(root.delta).stop_reason
         if (reason)
@@ -724,7 +768,7 @@ class ResponseBridge {
         type: 'message',
         role: 'assistant',
         model: this.model,
-        content: this.blocks.map((b) => this.anthropicBlock(b)),
+        content: this.blocks.filter((b) => !b.truncated).map((b) => this.anthropicBlock(b)),
         stop_reason: this.stopReason(),
         stop_sequence: null,
         usage: { input_tokens: 0, output_tokens: 0, ...this.usageFor('messages') },

@@ -10,5 +10,5 @@
     "outDir": "artifacts/tests",
     "rootDir": "."
   },
-  "include": ["tests/**/*.ts"]
+  "include": ["tests/**/*.ts", "src/main/services/request-history-worker.ts"]
 }

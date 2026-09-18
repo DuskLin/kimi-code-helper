@@ -1,9 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { GatewaySnapshot, RequestHistoryPage, RequestRecord } from '../../shared/contracts'
+import type { RequestHistoryPage, RequestRecord } from '../../shared/contracts'
 import type { UsageQuery, UsageStats, UsageTotals } from '../../shared/usage'
-import { requestCost } from '../../shared/request-cost'
+import { requestCost, type RequestPricing } from '../../shared/request-cost'
 import { localDayKey, summarizeActivity } from '../../shared/usage'
 import type { QuotaCostCycle, QuotaCostEstimate, QuotaCycleQuery } from '../../shared/quota-cost'
 
@@ -24,7 +24,11 @@ function cycleQuery(value: unknown): QuotaCycleQuery {
 export class RequestHistory {
   private db: DatabaseSync
   private quotaRecords = new Map<string, { start: number; end: number; records: RequestRecord[] }>()
-  constructor(file: string) {
+  constructor(file: string, readOnly = false) {
+    if (readOnly) {
+      this.db = new DatabaseSync(file, { readOnly: true })
+      return
+    }
     mkdirSync(dirname(file), { recursive: true })
     this.db = new DatabaseSync(file)
     chmodSync(file, 0o600)
@@ -186,10 +190,18 @@ export class RequestHistory {
   close(): void {
     this.db.close()
   }
-  usage(
-    query: UsageQuery,
-    pricing?: Pick<GatewaySnapshot, 'accounts' | 'modelPrices' | 'modelPriceCatalog'>
-  ): UsageStats {
+  get dataVersion(): number {
+    return Number(this.db.prepare('PRAGMA data_version').get()!.data_version)
+  }
+  usageSnapshot(query: UsageQuery, pricing?: RequestPricing): UsageStats {
+    this.db.exec('BEGIN')
+    try {
+      return this.usage(query, pricing)
+    } finally {
+      this.db.exec('ROLLBACK')
+    }
+  }
+  usage(query: UsageQuery, pricing?: RequestPricing): UsageStats {
     const costs = new Map<string, string>()
     if (pricing)
       this.db.function('request_cost', (raw) => {

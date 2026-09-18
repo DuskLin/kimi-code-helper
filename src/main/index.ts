@@ -17,6 +17,7 @@ import { IPC } from '../shared/contracts'
 import { SettingsStore } from './services/settings'
 import { GatewayStore, string } from './services/gateway-store'
 import { Gateway } from './services/gateway'
+import { UsageService } from './services/usage-service'
 import { UpdateService } from './services/updates'
 import { UnsignedMacUpdater } from './services/mac-updater'
 import { createTray } from './tray'
@@ -30,6 +31,7 @@ if (process.env.KIMI_HELPER_TEST_USER_DATA)
 const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 let gateway: Gateway | undefined
+let usageService: UsageService | undefined
 let updates: UpdateService | undefined
 let quitting = false
 let tray: Electron.Tray | undefined
@@ -123,6 +125,8 @@ void app
     })
     await gatewayStore.load()
     const service = new Gateway(gatewayStore)
+    const statistics = new UsageService(gatewayStore.historyPath)
+    usageService = statistics
     await service.pricing.load()
     gateway = service
     const handle = (channel: string, callback: (value: unknown) => unknown): void => {
@@ -187,9 +191,14 @@ void app
       service.history.setQuotaCycleExcluded(input)
       return service.snapshot()
     })
-    handle(IPC.usageStats, (query) =>
-      service.history.usage(query as import('../shared/usage').UsageQuery, service.snapshot())
-    )
+    handle(IPC.usageStats, (query) => {
+      const data = gatewayStore.get()
+      return statistics.usage(query as import('../shared/usage').UsageQuery, {
+        accounts: data.accounts.map(({ id, provider }) => ({ id, provider })),
+        modelPrices: data.modelPrices,
+        modelPriceCatalog: service.pricing.snapshot()
+      })
+    })
     handle(IPC.accountSave, (value) => service.saveAccount(value))
     handle(IPC.accountInspect, (value) => service.inspectAccount(value))
     handle(IPC.accountRefresh, (value) => service.refreshAccount(value))
@@ -268,6 +277,7 @@ app.on('before-quit', (event) => {
 
 // before-quit / will-quit 可被取消；仅在不可取消的实际退出事件关闭数据库。
 app.on('quit', () => {
+  void usageService?.close()
   tray?.destroy()
   updates?.dispose()
   gateway?.history.close()

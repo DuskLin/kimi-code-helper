@@ -1,5 +1,6 @@
 import { Transform, type TransformCallback } from 'node:stream'
 import { StringDecoder } from 'node:string_decoder'
+import { generationFailure } from '../../shared/upstream-status'
 import { parseUsage, type TokenUsage, type UsageProtocol } from '../../shared/usage'
 
 export function validRequestId(value: unknown): value is string {
@@ -29,6 +30,7 @@ export class ResponseIdsObserver extends Transform {
     }
     try {
       const root = JSON.parse(data)
+      if (generationFailure(root)) this.onStreamState?.('error')
       if (this.streaming) {
         const type = root?.type ?? this.event
         if (['response.failed', 'error'].includes(type) || root?.error)

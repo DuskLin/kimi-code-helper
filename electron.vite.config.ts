@@ -3,7 +3,17 @@ import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  main: {},
+  main: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          'request-history-worker': resolve('src/main/services/request-history-worker.ts')
+        },
+        output: { entryFileNames: '[name].js' }
+      }
+    }
+  },
   preload: {
     build: { rollupOptions: { output: { format: 'cjs', entryFileNames: 'index.js' } } }
   },

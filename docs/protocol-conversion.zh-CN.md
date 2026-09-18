@@ -161,7 +161,7 @@ Responses 的 custom 工具通过函数工具承载，其参数 schema 固定为
 
 `tool_choice` 支持 auto、none、required/any，以及指定已声明工具；指定未声明名称会报 400。Messages 的 `disable_parallel_tool_use` 与其他协议的 `parallel_tool_calls` 互为布尔反值。
 
-目标为 Messages 时，工具参数必须解析为 JSON 对象。响应侧工具块关闭时也会验证参数；数组、损坏 JSON 或不符合 custom 包装的内容会失败。网关只转发工具调用与结果，不负责执行客户端工具。
+目标为 Messages 时，工具参数必须解析为 JSON 对象。响应侧在结束原因确定后验证工具参数；数组、损坏 JSON 或不符合 custom 包装的内容会失败。若结束原因为 token 上限，未写完的 JSON 按截断处理：Responses 保留部分 arguments 并标记 incomplete；Messages 省略无法表示为对象的工具块并返回 max_tokens。custom 工具包装未完成时不生成可执行的 input.done。此类截断不会触发账号冷却。网关只转发工具调用与结果，不负责执行客户端工具。
 
 ## 5. 生成参数与结构化输出
 
@@ -246,6 +246,8 @@ Chat 可能先发送工具 ID 和参数片段，之后才发送工具名。适�
 目标 Chat 将 stop_sequence 转为 stop；普通 stop 且存在工具块时改为 tool_calls。目标 Messages 优先把 length 映射为 max_tokens，再根据是否含工具块返回 tool_use，否则使用 stop_sequence 或 end_turn。当前 Messages 输出没有独立的 content_filter 映射，且 `stop_sequence` 字段返回 null，不保留具体命中的停止字符串。
 
 仅包含 usage 的 Messages delta 不会清除此前的停止原因，防止达到输出上限的响应被误记为正常结束。
+
+Chat 的 `aborted` 和 `insufficient_system_resource` 视为上游故障，跨协议返回失败状态；同协议正文保持透传，但请求历史和调度器记录失败，不计入成功率。
 
 ### 7.2 思考与拒绝信息
 

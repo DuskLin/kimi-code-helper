@@ -473,6 +473,141 @@ async function storeFixture() {
   return { store, file, secrets, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }
 
+test('rejected traffic does not write permanent history; accepted traffic still does', async () => {
+  const f = await gatewayFixture((_req, res) => res.end('{}'))
+  try {
+    for (let i = 0; i < 25; i++) {
+      const response = await fetch(f.url + '/groups/rejected/v1/models')
+      assert.equal(response.status, 401)
+      await response.text()
+    }
+    const missing = await fetch(f.url + '/not-a-route')
+    assert.equal(missing.status, 404)
+    await missing.text()
+    const origin = await fetch(f.url + '/v1/models', { headers: { origin: 'https://example.org' } })
+    assert.equal(origin.status, 403)
+    await origin.text()
+    assert.equal(f.gateway.history.page().total, 0)
+    assert.equal(f.gateway.snapshot().requests.length, 0)
+    await (await f.post()).text()
+    await eventually(() => f.gateway.history.page().total === 1)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('shutdown aborts background metadata requests and does not start remaining accounts', async () => {
+  const f = await storeFixture()
+  let calls = 0
+  let aborted = false
+  let offline = true
+  const gateway = new Gateway(f.store, undefined, async (_url, init) => {
+    calls++
+    if (!offline) return Response.json({ data: [{ id: 'm' }] })
+    return new Promise((_resolve, reject) => {
+      init!.signal!.addEventListener(
+        'abort',
+        () => {
+          aborted = true
+          reject(init!.signal!.reason)
+        },
+        { once: true }
+      )
+    })
+  })
+  try {
+    await f.store.saveAccount(accountInput('a'))
+    await f.store.saveAccount(accountInput('b'))
+    const refresh = gateway.refreshStaleAccounts()
+    await eventually(() => calls === 1)
+    await gateway.shutdown()
+    await refresh
+    assert.equal(aborted, true)
+    assert.equal(calls, 1)
+    assert.equal(f.store.get().accounts[0].capabilities, null)
+    assert.equal(gateway.scheduler.state(f.store.get().accounts[0].id).lastError, '')
+    offline = false
+    await gateway.refreshStaleAccounts()
+    assert.equal(calls, 5)
+  } finally {
+    await gateway.shutdown()
+    gateway.history.close()
+    await f.cleanup()
+  }
+})
+
+test('upstream finish failures are accounted as interruptions in JSON and SSE passthrough', async () => {
+  for (const stream of [false, true]) {
+    const chunk = {
+      choices: [
+        {
+          message: { content: 'partial' },
+          delta: { content: 'partial' },
+          finish_reason: 'insufficient_system_resource'
+        }
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 2 }
+    }
+    const body = stream
+      ? `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`
+      : JSON.stringify(chunk)
+    const f = await gatewayFixture(
+      (_req, res) => {
+        res.writeHead(200, { 'content-type': stream ? 'text/event-stream' : 'application/json' })
+        res.end(body)
+      },
+      ['a']
+    )
+    try {
+      assert.equal(await (await f.post({ stream })).text(), body)
+      await eventually(() => f.gateway.history.page().total === 1)
+      const record = f.gateway.history.page().records[0]
+      assert.equal(record.status, 502)
+      assert.equal(record.interruption, 'upstream_error')
+      assert.equal(record.usage?.output, 2)
+      assert.equal(f.gateway.snapshot().accounts[0].runtime.successes, 0)
+      assert.equal(f.gateway.snapshot().accounts[0].runtime.failures, 1)
+    } finally {
+      await f.cleanup()
+    }
+  }
+})
+
+test('converted truncated tools report incomplete without cooling a healthy account', async () => {
+  const f = await gatewayFixture(
+    (_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                tool_calls: [{ id: 'c', function: { name: 'read', arguments: '{"path":' } }]
+              },
+              finish_reason: 'length'
+            }
+          ]
+        })
+      )
+    },
+    ['a']
+  )
+  try {
+    await f.store.mutate((data) => {
+      data.accounts[0].modelProtocols = { 'kimi-for-coding': ['chat-completions'] }
+    })
+    const response = await f.post({ input: 'hello' }, {}, '/v1/responses')
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).status, 'incomplete')
+    await eventually(() => f.gateway.history.page().total === 1)
+    assert.equal(f.gateway.history.page().records[0].interruption, null)
+    assert.equal(f.gateway.snapshot().accounts[0].runtime.cooldownUntil, 0)
+    assert.equal(f.gateway.snapshot().accounts[0].runtime.failures, 0)
+  } finally {
+    await f.cleanup()
+  }
+})
+
 test('LAN sharing preserves loopback, requires authentication and advertises the reached address', async () => {
   const f = await storeFixture()
   const gateway = new Gateway(f.store, undefined, undefined, async () => Response.json({}))

@@ -66,8 +66,16 @@ export class KimiCapabilities {
     region: Region,
     key: string,
     force = false,
-    provider: Provider = 'kimi'
+    provider: Provider = 'kimi',
+    signal?: AbortSignal
   ): Promise<AccountCapabilities> {
+    // A cancellable background refresh must not cancel a shared foreground probe.
+    if (signal) {
+      signal.throwIfAborted()
+      const result = await this.fetch(region, key, provider, signal)
+      signal.throwIfAborted()
+      return structuredClone(result)
+    }
     const fingerprint = createHash('sha256').update(`${provider}\0${region}\0${key}`).digest('hex')
     const cached = this.cache.get(fingerprint)
     if (!force && cached && Date.now() - cached.checkedAt < 60000) return structuredClone(cached)
@@ -136,10 +144,12 @@ export class KimiCapabilities {
   private async fetch(
     region: Region,
     key: string,
-    provider: Provider
+    provider: Provider,
+    parentSignal?: AbortSignal
   ): Promise<AccountCapabilities> {
     const base = accountBaseUrl(region, provider)
-    const signal = AbortSignal.timeout(15000)
+    const timeout = AbortSignal.timeout(15000)
+    const signal = parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout
     const models: string[] = []
     const concurrency: number[] = []
     const cursors = new Set<string>()
@@ -190,6 +200,7 @@ export class KimiCapabilities {
       warning = error instanceof Error ? error.message : '上游额度与并发信息读取失败'
     }
     const maxConcurrency = concurrency.length ? Math.min(...concurrency) : null
+    parentSignal?.throwIfAborted()
     if (maxConcurrency === null)
       warning = `${warning ? warning + '；' : ''}未获取到并发上限，使用默认 ${DEFAULT_ACCOUNT_CONCURRENCY} 个并发调度`
     return {
