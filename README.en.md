@@ -4,7 +4,7 @@
 
 <h1 align="center">Navo</h1>
 
-Navo was previously named Kimi Code Helper. Existing accounts, settings, and the update channel are preserved. The macOS `.app` filename, update ZIP filename, and data directory retain their legacy names for compatibility with installed versions; DMG installers use `Navo-VERSION-mac-ARCH.dmg`.
+Navo was previously named Kimi Code Helper. It now uses its own Navo application identity and data directory; legacy configuration is not loaded automatically.
 
 <p align="center">One desktop app to manage Kimi Code, DeepSeek, and OpenCode Go accounts, requests, and usage.</p>
 
@@ -14,36 +14,61 @@ Navo was previously named Kimi Code Helper. Existing accounts, settings, and the
   <a href="https://github.com/DuskLin/navo/releases">Downloads</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#connect-your-client">Client setup</a> ·
+  <a href="#remote-quota-dashboard">Remote dashboard</a> ·
   <a href="docs/reference.zh-CN.md">Technical reference (Chinese)</a>
 </p>
 
 ![Light overview showing account quotas, concurrency, and token activity](docs/images/overview-light.png)
 
-> Screenshots show the real Electron UI running against local smoke-test fixtures. Accounts, quotas, costs, and requests are simulated; the port shown is assigned dynamically for testing. The application UI is currently in Chinese; this project provides Chinese and English READMEs.
+> Desktop screenshots show the real Electron UI running against local smoke-test fixtures. Accounts, quotas, costs, and requests are simulated; the port shown is assigned dynamically for testing. The application UI is currently in Chinese; this project provides Chinese and English READMEs.
 
 ## Features
 
 Navo combines provider accounts into a local pool and gives coding assistants a single HTTP gateway on `127.0.0.1`. Loopback clients do not need a key; LAN clients use a gateway key. The app selects an available account, forwards requests, and records usage.
 
-| Feature                | What it does                                                                                                                     |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Multiple providers     | Add, edit, enable, and disable accounts; sync models, quotas, or balances                                                        |
-| Account scheduling     | Keep sessions on the same account when available; score new sessions by concurrency and remaining quota, with failover           |
-| Three client protocols | OpenAI Responses, Chat Completions, and Anthropic Messages, with passthrough or conversion based on model protocol settings      |
-| Usage and performance  | Token trends, cache hit rates, activity heatmaps, time to first token, generation speed, and peak/off-peak performance           |
-| Cost estimates         | Prefer upstream-reported costs; otherwise estimate from model prices, with price configuration and subscription quota valuation  |
-| Live gateway topology  | Harness → session → model nodes, directional upload/download connections, and model token usage |
-| Session retention      | Aggregate calls per session, stable node ordering, and a 5/10/15/30/60-minute idle-retention slider |
-| Client and model logos | Recognize supported Harness clients and display model-family brand icons |
-| LAN sharing            | Optional LAN listening, address copying, and gateway-key rotation |
-| Model registry         | Kimi Code import with known context limits, reasoning efforts, and input/output capabilities |
-| Background operation   | Keep the gateway running in the tray after closing the window; animate the tray icon during requests |
-| Desktop controls       | Light and dark themes, card visibility settings, and reorderable account cards                                                   |
-| Local storage          | Encrypt configuration with system secure storage; persist request summaries in SQLite without storing prompts or response bodies |
+| Feature                     | What it does                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Multiple providers          | Add, edit, enable, and disable accounts; sync models, quotas, or balances                                                        |
+| Account scheduling          | Keep sessions on the same account when available; score new sessions by concurrency and remaining quota, with failover           |
+| Three client protocols      | OpenAI Responses, Chat Completions, and Anthropic Messages, with passthrough or conversion based on model protocol settings      |
+| Usage and performance       | Token trends, cache hit rates, activity heatmaps, time to first token, generation speed, and peak/off-peak performance           |
+| Cost estimates              | Prefer upstream-reported costs; otherwise estimate from model prices, with price configuration and subscription quota valuation  |
+| Live gateway topology       | Harness → session → model nodes, directional upload/download connections, and model token usage                                  |
+| Session retention           | Aggregate calls per session, stable node ordering, and a 5/10/15/30/60-minute idle-retention slider                              |
+| Client and model logos      | Recognize supported Harness clients and display model-family brand icons                                                         |
+| LAN sharing                 | Optional LAN listening, address copying, and gateway-key rotation                                                                |
+| Remote quota dashboard      | View live quotas, balances, and usage in phone, iPad, and desktop browsers, with orientation-aware layouts and account details   |
+| Built-in Cloudflare Tunnel  | Manage temporary public links or a fixed domain inside the app; no separate connector installation                               |
+| Read-only access protection | Independent access codes, HTTPS, session revocation, and login rate limits; inference APIs and account secrets are not exposed   |
+| Model registry              | Kimi Code import with known context limits, reasoning efforts, and input/output capabilities                                     |
+| Background operation        | Keep the gateway running in the tray after closing the window; animate the tray icon during requests                             |
+| Desktop controls            | Light and dark themes, card visibility settings, and reorderable account cards                                                   |
+| Local storage               | Encrypt configuration with system secure storage; persist request summaries in SQLite without storing prompts or response bodies |
 
 ## Screenshots
 
 The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Navo” (Quit Navo) to stop the gateway and exit; macOS also supports ⌘Q.
+
+### Phone dashboard
+
+Portrait mode uses a single column and bottom navigation. Open an account to inspect its quota windows, reset times, and usage trend. Landscape mode switches to two columns and top navigation. Account names come directly from your settings.
+
+<p align="center">
+  <img src="docs/images/dashboard-phone.png" alt="Phone portrait quota overview with account balances and low-quota warnings" width="300" />
+  <img src="docs/images/dashboard-phone-detail.png" alt="Phone account details showing remaining quota and reset time" width="300" />
+</p>
+
+### iPad dashboard
+
+Portrait mode displays two columns; landscape mode expands to three. Cards in each row have equal heights, and account details use a split layout.
+
+<p align="center">
+  <img src="docs/images/dashboard-ipad-portrait.png" alt="iPad portrait dashboard with two quota columns" width="360" />
+</p>
+
+![iPad landscape dashboard with three quota columns](docs/images/dashboard-ipad-landscape.png)
+
+> These are actual web UI screenshots captured at 2× resolution with emulated phone/iPad viewports and fixed demo data. They contain no real accounts, access codes, or public URLs. They are not photos of physical devices or a native iOS app. In normal use, the dashboard displays live data synchronized by the desktop app.
 
 ### Live gateway dashboard
 
@@ -111,6 +136,18 @@ npm run dev
 3. Start the gateway. It listens on `127.0.0.1:17300` by default. Stop it before changing the port if that port is occupied.
 4. Copy the address and **gateway key** from the account pool, or use **Kimi 配置** (Kimi config) / **Claude 配置** (Claude config).
 5. Configure a client using the examples below, then inspect the overview and request history after sending a request.
+
+## Remote quota dashboard
+
+Open **设置 → 远程仪表盘** (Settings → Remote dashboard) in the desktop app and enable the dashboard. The web page refreshes every 30 seconds and when brought back to the foreground, with manual refresh, light/dark themes, and connection/stale-data indicators. Keep the desktop app running; it can remain in the tray with its main window closed.
+
+1. **LAN access:** enable LAN access and open the displayed HTTPS address (default port `61948`). Before trusting the self-signed certificate, compare its SHA-256 fingerprint with the value under certificate/access management.
+2. **Public access:** select a temporary link or a fixed domain, then save and apply. The connector is bundled with the app. A fixed domain requires your Cloudflare domain and a dedicated Tunnel Token; see the [configuration guide](docs/mobile-dashboard.md) (Chinese).
+3. **Sign in:** copy the access code from the desktop app, open the address in a phone or iPad browser, and enter the code. Share the URL and code separately. Sessions last up to eight hours; rotating the access code immediately revokes existing sessions.
+
+Temporary links change whenever the connector restarts. **An online connector does not guarantee that the public URL is ready.** DNS/edge propagation, proxies, and cached results can cause a delay. Wait for the public reachability check to pass. Failed checks retry every 15 seconds, or you can retry manually; repeatedly restarting the connector creates more new URLs.
+
+The dashboard has its own read-only server and access code, separate from the inference gateway and its keys. It does not expose API keys, group keys, request bodies, or management APIs. Access codes and Tunnel credentials are encrypted with system secure storage. See the [dashboard guide](docs/mobile-dashboard.md) for security boundaries, fixed-domain configuration, and troubleshooting.
 
 ## How it works
 
@@ -195,7 +232,7 @@ Authentication accepts `Authorization: Bearer …` or `x-api-key`. OpenCode Go's
 - Cross-protocol requests require full message history. Upstream-private references such as `previous_response_id` and `file_id`, upstream-hosted search, background tasks, and `n > 1` are unsupported during conversion and produce explicit errors.
 - Cost estimates use current model prices and treat missing prices and usage as zero. Updating prices changes historical estimates; currencies remain separate. Cost estimates and quota valuations are not actual bills. Interrupted usage includes only usage reported before interruption.
 - Configuration is encrypted using system secure storage in `gateway.json` under Electron's user data directory. Linux refuses to save credentials without an available keyring. Encrypted configuration depends on the original system keychain and is not portable between machines.
-- Request summaries persist in `gateway.json.requests.sqlite` in the same directory without automatic cleanup. Theme preferences live in `settings.json`. The default macOS directory is `~/Library/Application Support/Kimi Code Helper/`.
+- Request summaries persist in `gateway.json.requests.sqlite` in the same directory without automatic cleanup. Theme preferences live in `settings.json`. The default macOS directory is `~/Library/Application Support/Navo/`.
 - On macOS, closing the window keeps the gateway running; quitting the app stops it. On other platforms, closing the last window quits the app. Session bindings, cooldowns, and runtime scheduling state reset on exit; configuration and request summaries persist.
 
 ## Development and verification
