@@ -1,0 +1,681 @@
+import { useEffect, useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import {
+  Activity,
+  ArrowDownLeft,
+  ArrowLeft,
+  ArrowUpRight,
+  BarChart3,
+  Check,
+  ChevronRight,
+  Clock3,
+  Cloud,
+  Database,
+  FlaskConical,
+  Layers3,
+  Moon,
+  PieChart,
+  RefreshCw,
+  Server,
+  ShieldCheck,
+  Sun,
+  Wifi,
+  WifiOff,
+  Zap
+} from 'lucide-react'
+import type { QuotaWindow } from '../../../shared/contracts'
+import {
+  accounts,
+  countdown,
+  formatTokens,
+  percent,
+  providerName,
+  type DashboardAccount,
+  type Provider
+} from './data'
+import logo from '../assets/navo-logo.png'
+import kimi from '../assets/kimi.svg'
+import deepseek from '../assets/deepseek.svg'
+import go from '../assets/models/opencode.svg'
+import './mobile.css'
+
+type Page = 'quota' | 'usage' | 'status'
+const tabs = [
+  { id: 'quota', name: '额度', icon: PieChart },
+  { id: 'usage', name: '用量', icon: BarChart3 },
+  { id: 'status', name: '状态', icon: Activity }
+] as const
+const sum = (key: 'requests' | 'tokens' | 'active') =>
+  accounts.reduce((value, account) => value + account[key], 0)
+const time = (value: number) => new Date(value).toLocaleTimeString('zh-CN', { hour12: false })
+
+function Badge({ low = false, children }: { low?: boolean; children: React.ReactNode }) {
+  return <span className={`badge ${low ? 'warning' : ''}`}>{children}</span>
+}
+function Identity({ account }: { account: DashboardAccount }) {
+  return (
+    <div className="identity">
+      <span className={`provider-logo ${account.provider.toLowerCase()}`}>
+        <img src={{ Kimi: kimi, DeepSeek: deepseek, Go: go }[account.provider]} alt="" />
+      </span>
+      <div>
+        <h3>{account.name}</h3>
+        <p>{providerName(account.provider)}</p>
+      </div>
+    </div>
+  )
+}
+function Meter({
+  value,
+  label,
+  now
+}: {
+  value: QuotaWindow | null | undefined
+  label: string
+  now: number
+}) {
+  const remaining = percent(value)
+  return (
+    <div className={`meter ${remaining !== null && remaining < 15 ? 'low' : ''}`}>
+      <div className="meter-title">
+        <span>{label}</span>
+        <strong>
+          {remaining ?? '—'}
+          {remaining !== null && <small>%</small>}
+        </strong>
+      </div>
+      <div
+        className="track"
+        role="meter"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={remaining ?? undefined}
+      >
+        <span style={{ width: `${remaining ?? 0}%` }} />
+      </div>
+      <p>
+        <Clock3 size={12} />
+        {countdown(value, now)}
+      </p>
+    </div>
+  )
+}
+function Chart({ multiplier = 1 }: { multiplier?: number }) {
+  const values = [
+    20, 26, 22, 31, 27, 37, 34, 50, 60, 73, 64, 86, 92, 78, 82, 63, 57, 48, 54, 43, 35, 40, 29, 24
+  ]
+  const [selected, setSelected] = useState<number | null>(null)
+  const heights = values.map((value) => 125 - value)
+  const slopes = heights.slice(1).map((y, i) => (y - heights[i]) / 20)
+  // Monotone cubic interpolation rounds the joins without inventing new extrema.
+  const tangents = heights.map((_, i) => {
+    if (i === 0) return slopes[0]
+    if (i === heights.length - 1) return slopes[i - 1]
+    const left = slopes[i - 1],
+      right = slopes[i]
+    return left * right <= 0 ? 0 : (2 * left * right) / (left + right)
+  })
+  const curve = heights
+    .slice(1)
+    .reduce(
+      (path, y, i) =>
+        `${path} C ${i * 20 + 20 / 3},${heights[i] + (tangents[i] * 20) / 3} ${(i + 1) * 20 - 20 / 3},${y - (tangents[i + 1] * 20) / 3} ${(i + 1) * 20},${y}`,
+      `M 0,${heights[0]}`
+    )
+  return (
+    <div className="chart">
+      <div className="chart-caption">
+        <span>Token / 小时</span>
+        <span>
+          {selected === null
+            ? '近 24 小时'
+            : `${23 - selected} 小时前 · ${Math.round(values[selected] * 820 * multiplier).toLocaleString()} Token`}
+        </span>
+      </div>
+      <div className="chart-plot">
+        <svg
+          viewBox="0 0 460 150"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="示例：近 24 小时 Token 用量趋势"
+        >
+          <defs>
+            <linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#2873ff" stopOpacity=".22" />
+              <stop offset="100%" stopColor="#2873ff" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[25, 65, 105, 145].map((y) => (
+            <line
+              key={y}
+              x1="0"
+              y1={y}
+              x2="460"
+              y2={y}
+              className="grid-line"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          <path d={`${curve} L 460,150 L 0,150 Z`} fill="url(#chart-fill)" />
+          <path
+            className="chart-curve"
+            d={curve}
+            fill="none"
+            stroke="#2873ff"
+            strokeWidth="2.5"
+            vectorEffect="non-scaling-stroke"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </svg>
+        {selected !== null && (
+          <span
+            className="chart-point"
+            aria-hidden="true"
+            style={{
+              left: `${(selected / (values.length - 1)) * 100}%`,
+              top: `${(heights[selected] / 150) * 100}%`
+            }}
+          />
+        )}
+        <div className="chart-touch">
+          {values.map((_, i) => (
+            <button
+              key={i}
+              aria-label={`查看 ${23 - i} 小时前用量`}
+              onMouseEnter={() => setSelected(i)}
+              onFocus={() => setSelected(i)}
+              onClick={() => setSelected(i)}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="chart-axis">
+        <span>24 小时前</span>
+        <span>18 小时前</span>
+        <span>12 小时前</span>
+        <span>6 小时前</span>
+        <span>现在</span>
+      </div>
+    </div>
+  )
+}
+function App() {
+  const [route, setRoute] = useState(location.hash.slice(1) || 'quota')
+  const [filter, setFilter] = useState<Provider | '全部'>('全部')
+  const [dark, setDark] = useState(() => localStorage.getItem('navo.mobile.theme') === 'dark')
+  const [connected, setConnected] = useState(true)
+  const [updated, setUpdated] = useState(Date.now())
+  const [now, setNow] = useState(Date.now())
+  const [refreshing, setRefreshing] = useState(false)
+  useEffect(() => {
+    const changed = () => {
+      setRoute(location.hash.slice(1) || 'quota')
+      window.scrollTo(0, 0)
+    }
+    window.addEventListener('hashchange', changed)
+    return () => window.removeEventListener('hashchange', changed)
+  }, [])
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    localStorage.setItem('navo.mobile.theme', dark ? 'dark' : 'light')
+  }, [dark])
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  useEffect(() => {
+    if (!connected) return
+    const timer = window.setInterval(() => setUpdated(Date.now()), 30000)
+    return () => clearInterval(timer)
+  }, [connected])
+  useEffect(() => {
+    if (!refreshing) return
+    const timer = window.setTimeout(() => {
+      if (connected) setUpdated(Date.now())
+      setRefreshing(false)
+    }, 550)
+    return () => clearTimeout(timer)
+  }, [refreshing, connected])
+  const account = route.startsWith('account/')
+    ? accounts.find((a) => a.id === route.split('/')[1])
+    : undefined
+  const page: Page = route === 'usage' || route === 'status' ? route : 'quota'
+  const stale = !connected || now - updated > 120000
+  const visible = accounts.filter((a) => filter === '全部' || a.provider === filter)
+  const refresh = (
+    <button
+      className={`icon-button ${refreshing ? 'refreshing' : ''}`}
+      onClick={() => setRefreshing(true)}
+      disabled={refreshing || !connected}
+      aria-label="刷新示例数据"
+    >
+      <RefreshCw size={19} />
+    </button>
+  )
+  const navigation = (
+    <>
+      {tabs.map(({ id, name, icon: Icon }) => (
+        <a
+          key={id}
+          href={`#${id}`}
+          className={page === id ? 'selected' : ''}
+          aria-current={page === id ? 'page' : undefined}
+        >
+          <Icon size={21} />
+          <span>{name}</span>
+        </a>
+      ))}
+    </>
+  )
+  return (
+    <div className={`dashboard ${page === 'quota' && !account ? 'quota-overview' : ''}`}>
+      <header className="topbar">
+        <a href="#quota" className="brand">
+          <img src={logo} alt="" />
+          <span>
+            Navo<span className="brand-description">额度仪表盘</span>
+          </span>
+        </a>
+        <nav className="desktop-nav" aria-label="主导航">
+          {navigation}
+        </nav>
+        <div className="top-actions">
+          <span className="preview-tag">
+            <FlaskConical size={13} />
+            交互预览
+          </span>
+          <button
+            className="icon-button theme-toggle"
+            onClick={() => setDark(!dark)}
+            aria-label={dark ? '切换浅色模式' : '切换深色模式'}
+          >
+            {dark ? <Sun size={19} /> : <Moon size={19} />}
+          </button>
+        </div>
+      </header>
+      <main>
+        <div className="heading">
+          <div>
+            {account ? (
+              <div className="detail-heading">
+                <a href="#quota" className="icon-button" aria-label="返回额度概览">
+                  <ArrowLeft size={22} />
+                </a>
+                <h1>账号详情</h1>
+              </div>
+            ) : (
+              <>
+                <div className="eyebrow">YOUR USAGE, AT A GLANCE</div>
+                <h1>{{ quota: '额度概览', usage: '用量分析', status: '连接状态' }[page]}</h1>
+              </>
+            )}
+            <div className={`sync-status ${stale ? 'stale' : ''}`} role="status">
+              <span className="status-dot" />
+              <span>{stale ? '连接中断 · 数据可能已过期' : '示例数据'}</span>
+              <span className="sync-time">更新于 {time(updated)}</span>
+            </div>
+          </div>
+          <div className="heading-actions">
+            <span className="auto-refresh">每 30 秒刷新</span>
+            {refresh}
+          </div>
+        </div>
+        {account ? (
+          <>
+            <div className="detail-identity">
+              <Identity account={account} />
+              <Badge low={(percent(account.quota?.fiveHour) ?? 100) < 15}>
+                {(percent(account.quota?.fiveHour) ?? 100) < 15 ? '额度偏低' : '可用'}
+              </Badge>
+            </div>
+            <div className="detail-grid">
+              <section className="panel quota-hero">
+                <div className="section-title">
+                  <h2>{account.quota ? '5 小时额度' : '账户余额'}</h2>
+                  <span className="subtle">{account.quota ? '当前窗口' : '按量付费'}</span>
+                </div>
+                {account.quota ? (
+                  <>
+                    <div
+                      className={`quota-ring ${(percent(account.quota.fiveHour) ?? 100) < 15 ? 'low' : ''}`}
+                      style={
+                        {
+                          '--remaining': `${(percent(account.quota.fiveHour) ?? 0) * 3.6}deg`
+                        } as React.CSSProperties
+                      }
+                    >
+                      <div>
+                        <strong>
+                          {percent(account.quota.fiveHour) ?? '—'}
+                          <small>%</small>
+                        </strong>
+                        <span>剩余额度</span>
+                      </div>
+                    </div>
+                    <div className="reset-row">
+                      <span>下次重置</span>
+                      <div>
+                        <strong>
+                          {account.quota.fiveHour?.resetAt
+                            ? new Date(account.quota.fiveHour.resetAt).toLocaleString('zh-CN', {
+                                month: 'numeric',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })
+                            : '未知'}
+                        </strong>
+                        <p>{countdown(account.quota.fiveHour, now)}</p>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="balance-hero">
+                    <span>可用余额</span>
+                    <strong>CNY {account.balance?.balances[0].balance.toFixed(2)}</strong>
+                    <p>各币种独立展示，不进行汇率换算</p>
+                  </div>
+                )}
+              </section>
+              <div className="detail-secondary">
+                {account.quota && (
+                  <section className="panel window-panel">
+                    <Meter value={account.quota.weekly} label="本周剩余额度" now={now} />
+                    {account.quota.monthly && (
+                      <Meter value={account.quota.monthly} label="本月剩余额度" now={now} />
+                    )}
+                  </section>
+                )}
+                <div className="mini-stats">
+                  <div className="panel">
+                    <span>今日请求</span>
+                    <strong>{account.requests}</strong>
+                  </div>
+                  <div className="panel">
+                    <span>今日 Token</span>
+                    <strong>{formatTokens(account.tokens)}</strong>
+                  </div>
+                </div>
+                <section className="panel">
+                  <div className="section-title">
+                    <h2>用量趋势</h2>
+                    <BarChart3 size={17} />
+                  </div>
+                  <Chart multiplier={account.tokens / sum('tokens')} />
+                </section>
+              </div>
+            </div>
+          </>
+        ) : page === 'quota' ? (
+          <>
+            <section className="summary" aria-label="账户汇总">
+              <div>
+                <span>
+                  <Layers3 size={16} />
+                  可用账号
+                </span>
+                <strong>
+                  4 <small>/ 4</small>
+                </strong>
+              </div>
+              <div>
+                <span>
+                  <Zap size={16} />
+                  进行中请求
+                </span>
+                <strong>
+                  2
+                  <span className="live-bars">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                </strong>
+              </div>
+              <div>
+                <span>
+                  <BarChart3 size={16} />
+                  今日 Token
+                </span>
+                <strong>{formatTokens(sum('tokens'))}</strong>
+              </div>
+              <div>
+                <span>
+                  <Activity size={16} />
+                  今日请求
+                </span>
+                <strong>
+                  {sum('requests')}
+                  <small> 次</small>
+                </strong>
+              </div>
+            </section>
+            <div className="list-toolbar">
+              <div className="filters" aria-label="按供应商筛选">
+                {(['全部', 'Kimi', 'DeepSeek', 'Go'] as const).map((value) => (
+                  <button
+                    key={value}
+                    className={filter === value ? 'active' : ''}
+                    aria-pressed={filter === value}
+                    onClick={() => setFilter(value)}
+                  >
+                    {value}
+                    {value === '全部' && <span>4</span>}
+                  </button>
+                ))}
+              </div>
+              <span className="account-count">{visible.length} 个账号</span>
+            </div>
+            <div className="account-grid">
+              {visible.map((a) => (
+                <a
+                  href={`#account/${a.id}`}
+                  className="account-card panel"
+                  key={a.id}
+                  aria-label={`查看${a.name}详情`}
+                >
+                  <div className="card-heading">
+                    <Identity account={a} />
+                    <div className="card-badges">
+                      {a.active > 0 && (
+                        <span className="active-requests" aria-label={`${a.active} 个请求进行中`}>
+                          <Zap size={12} />
+                          {a.active}
+                        </span>
+                      )}
+                      <Badge low={(percent(a.quota?.fiveHour) ?? 100) < 15}>
+                        {(percent(a.quota?.fiveHour) ?? 100) < 15 ? '额度偏低' : '可用'}
+                      </Badge>
+                      <ChevronRight size={17} />
+                    </div>
+                  </div>
+                  {a.quota ? (
+                    <div className="quota-columns">
+                      <Meter label="5 小时剩余" value={a.quota.fiveHour} now={now} />
+                      <Meter label="本周剩余" value={a.quota.weekly} now={now} />
+                      {a.quota.monthly && (
+                        <div className="monthly">
+                          <span>本月剩余</span>
+                          <strong>{percent(a.quota.monthly)}%</strong>
+                          <span>{countdown(a.quota.monthly, now)}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="balance">
+                      <span>账户余额</span>
+                      {a.balance?.balances.map((b) => (
+                        <strong key={b.currency}>
+                          <small>{b.currency}</small> {b.balance.toFixed(2)}
+                        </strong>
+                      ))}
+                      <p>按实际用量计费</p>
+                    </div>
+                  )}
+                </a>
+              ))}
+            </div>
+            <section className="panel overview-trend">
+              <div className="section-title">
+                <div>
+                  <h2>用量趋势</h2>
+                  <p>所有账号 · 近 24 小时</p>
+                </div>
+                <a href="#usage">
+                  查看分析
+                  <ArrowUpRight size={15} />
+                </a>
+              </div>
+              <Chart />
+            </section>
+          </>
+        ) : page === 'usage' ? (
+          <>
+            <section className="usage-stats">
+              <div className="panel">
+                <span>今日 Token</span>
+                <strong>{formatTokens(sum('tokens'))}</strong>
+                <small>
+                  <ArrowUpRight size={14} />
+                  所有账号合计
+                </small>
+              </div>
+              <div className="panel">
+                <span>今日请求</span>
+                <strong>{sum('requests')}</strong>
+                <small>
+                  <ArrowDownLeft size={14} />
+                  包含已完成和进行中请求
+                </small>
+              </div>
+            </section>
+            <div className="usage-grid">
+              <section className="panel">
+                <div className="section-title">
+                  <h2>用量趋势</h2>
+                  <Badge>近 24 小时</Badge>
+                </div>
+                <Chart />
+              </section>
+              <section className="panel">
+                <div className="section-title">
+                  <h2>账号用量分布</h2>
+                  <span className="subtle">今日 Token</span>
+                </div>
+                <div className="distribution">
+                  {[...accounts]
+                    .sort((a, b) => b.tokens - a.tokens)
+                    .map((a) => (
+                      <a key={a.id} href={`#account/${a.id}`}>
+                        <div>
+                          <Identity account={a} />
+                          <strong>{formatTokens(a.tokens)}</strong>
+                        </div>
+                        <div className="track">
+                          <span style={{ width: `${(a.tokens / sum('tokens')) * 100}%` }} />
+                        </div>
+                      </a>
+                    ))}
+                </div>
+              </section>
+            </div>
+          </>
+        ) : (
+          <div className="status-grid">
+            <section className="panel connection-panel">
+              <div className={`connection-icon ${stale ? 'offline' : ''}`}>
+                {connected ? <Wifi size={30} /> : <WifiOff size={30} />}
+              </div>
+              <h2>{connected ? '连接演示正常' : '连接已中断'}</h2>
+              <p>
+                {connected
+                  ? '当前使用示例数据，可模拟断线查看页面状态。'
+                  : '保留最后一次数据，恢复连接后继续刷新。'}
+              </p>
+              <div className="connection-path">
+                <span>
+                  <Server />
+                  本地应用
+                </span>
+                <ChevronRight size={16} />
+                <span>
+                  <Cloud />
+                  远程访问
+                </span>
+                <ChevronRight size={16} />
+                <span>
+                  <PieChart />
+                  仪表盘
+                </span>
+              </div>
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setConnected(!connected)
+                  if (!connected) setUpdated(Date.now())
+                }}
+              >
+                {connected ? '模拟连接中断' : '恢复演示连接'}
+              </button>
+            </section>
+            <section className="panel status-details">
+              <h2>同步信息</h2>
+              <dl>
+                <div>
+                  <dt>
+                    <Database size={16} />
+                    数据来源
+                  </dt>
+                  <dd>本地示例数据</dd>
+                </div>
+                <div>
+                  <dt>
+                    <Clock3 size={16} />
+                    刷新间隔
+                  </dt>
+                  <dd>30 秒</dd>
+                </div>
+                <div>
+                  <dt>
+                    <RefreshCw size={16} />
+                    最后刷新
+                  </dt>
+                  <dd>{time(updated)}</dd>
+                </div>
+                <div>
+                  <dt>
+                    <Cloud size={16} />
+                    Cloudflare Tunnel
+                  </dt>
+                  <dd>尚未接入</dd>
+                </div>
+                <div>
+                  <dt>
+                    <ShieldCheck size={16} />
+                    访问方式
+                  </dt>
+                  <dd>只读预览</dd>
+                </div>
+              </dl>
+              <div className="status-note">
+                <Check size={17} />
+                <span>此页面不包含账号密钥或管理操作。</span>
+              </div>
+            </section>
+          </div>
+        )}
+        <footer className="page-footer">
+          <FlaskConical size={13} />
+          示例数据 · 仅用于体验预览<span>最后更新 {time(updated)}</span>
+        </footer>
+      </main>
+      <nav className="bottom-nav" aria-label="移动端导航">
+        {navigation}
+      </nav>
+    </div>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(<App />)

@@ -8,6 +8,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:mobile": "vite --config vite.mobile.config.ts --open /mobile.html",
+    "build:mobile": "npm run typecheck && vite build --config vite.mobile.config.ts",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
