@@ -1,4 +1,6 @@
-/** Only explicit conversation identifiers; cache keys and user IDs are not session IDs. */
+import { identifyHarness } from './live-flow'
+
+/** Explicit conversation IDs and client-specific fields with known session semantics. */
 export function requestSessionId(
   headers: Record<string, string | string[] | undefined>,
   payload: Record<string, unknown>
@@ -17,6 +19,10 @@ export function requestSessionId(
       )?.[1]
     }
   }
+  // Kimi Code's resolveRequestParams uses sessionContext.sessionId as cacheKey.
+  // OpenAI/Kimi encode it as prompt_cache_key; Anthropic uses metadata.user_id.
+  // Do not apply those semantics to arbitrary clients' cache keys or user IDs.
+  const kimiCode = identifyHarness(headers) === 'Kimi Code'
   for (const value of [
     headers['x-session-id'],
     headers['x-opencode-session'],
@@ -28,7 +34,8 @@ export function requestSessionId(
     payload.session_id,
     payload.conversation_id,
     metadata.session_id,
-    encoded
+    encoded,
+    ...(kimiCode ? [payload.prompt_cache_key, metadata.user_id] : [])
   ]) {
     if (
       typeof value === 'string' &&

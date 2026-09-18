@@ -1275,6 +1275,56 @@ test('账号分组串行落盘、加密、校验和损坏保护', async () => {
   }
 })
 
+test('Kimi Code session IDs persist across protocols and contribute to chat duration', async () => {
+  const received: Record<string, unknown>[] = []
+  const f = await gatewayFixture((req, res) => {
+    let body = ''
+    req.on('data', (chunk) => (body += chunk))
+    req.on('end', () => {
+      received.push(JSON.parse(body))
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ ok: true }))
+    })
+  })
+  try {
+    const headers = { 'x-msh-platform': 'kimi_code_desktop' }
+    const session = 'kimi-desktop-session'
+    for (const [path, payload] of [
+      ['/v1/chat/completions', { prompt_cache_key: session }],
+      ['/v1/responses', { prompt_cache_key: session }],
+      ['/v1/messages', { metadata: { user_id: session } }]
+    ] as const) {
+      const response = await f.post(payload, headers, path)
+      assert.equal(response.status, 200)
+      await response.text()
+    }
+    const records = f.gateway.history.page().records
+    assert.equal(records.length, 3)
+    assert.match(records[0].sessionId!, /^[0-9a-f]{64}$/)
+    assert.equal(new Set(records.map((r) => r.sessionId)).size, 1)
+    assert.equal(received[0].prompt_cache_key, session)
+    assert.equal(received[1].prompt_cache_key, session)
+    assert.deepEqual(received[2].metadata, { user_id: session })
+    const activity = f.gateway.history.usage({
+      start: Date.now() - 86400000,
+      end: Date.now() + 86400000,
+      bucketMs: 86400000,
+      allHistory: true
+    }).activity!
+    assert.equal(
+      activity.longestChatMs,
+      Math.max(...records.map((r) => r.time + r.durationMs)) -
+        Math.min(...records.map((r) => r.time))
+    )
+    await (await f.post({ prompt_cache_key: 'another-session' }, headers)).text()
+    assert.notEqual(f.gateway.history.page().records[0].sessionId, records[0].sessionId)
+    await (await f.post({ prompt_cache_key: session })).text()
+    assert.equal(f.gateway.history.page().records[0].sessionId, undefined)
+  } finally {
+    await f.cleanup()
+  }
+})
+
 test('真实 HTTP 转发、分组密钥隔离与会话保持，凭据不出现在快照', async () => {
   const received: { auth: string; url: string; body: string; localKey?: string }[] = []
   const f = await gatewayFixture((req, res) => {
