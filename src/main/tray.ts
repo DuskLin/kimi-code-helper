@@ -1,5 +1,5 @@
 import { app, Menu, nativeImage, Tray } from 'electron'
-import appLogo from '../renderer/src/assets/kimi-code-helper-logo.png?asset'
+import appLogo from '../renderer/src/assets/navo-logo.png?asset'
 
 function trayIcon(source: Electron.NativeImage, phase?: number): Electron.NativeImage {
   const icon = nativeImage.createEmpty()
@@ -44,7 +44,7 @@ export function createTray(
   const unsubscribe = subscribe((count) => {
     if (tray.isDestroyed()) return
     tray.setToolTip(
-      count > 0 ? `Kimi Code Helper · 正在处理 ${count} 个请求` : 'Kimi Code Helper · 空闲'
+      count > 0 ? `Navo · 正在处理 ${count} 个请求` : 'Navo · 空闲'
     )
     if (count > 0 && !timer) {
       frame = 0
@@ -74,7 +74,7 @@ export function createTray(
       { label: '显示主窗口', click: showWindow },
       { label: '关闭窗口后，网关继续在后台运行', enabled: false },
       { type: 'separator' },
-      { label: '退出 Kimi Code Helper', click: () => app.quit() }
+      { label: '退出 Navo', click: () => app.quit() }
     ])
   )
   // macOS single click opens the menu; Windows/Linux can also restore directly.

@@ -290,7 +290,7 @@ test('api.json exports a live authenticated Kimi Code registry without secrets',
     assert.deepEqual(JSON.parse(body), {
       'kimi-code-helper': {
         id: 'kimi-code-helper',
-        name: 'Kimi Code Helper',
+        name: 'Navo',
         type: 'openai',
         api: `${reserved.url}/v1`,
         models: {

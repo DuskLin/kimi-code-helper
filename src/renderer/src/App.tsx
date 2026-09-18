@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Link2, Moon, Sun } from 'lucide-react'
 import type { AppInfo, Theme } from '../../shared/contracts'
 import { GatewayPanel, type GatewayStatus, type GatewayPage } from './GatewayPanel'
-import appLogo from './assets/kimi-code-helper-logo.png'
+import appLogo from './assets/navo-logo.png'
 import { UpdateControl } from './UpdateControl'
 
 const viewStorageKey = 'kimi-helper.main-view'
@@ -96,9 +96,9 @@ export function App() {
   return (
     <div className={`app-shell ${info?.platform === 'darwin' ? 'macos' : ''}`}>
       <header className="titlebar">
-        <div className="app-brand" aria-label="Kimi Code Helper">
+        <div className="app-brand" aria-label="Navo">
           <img src={appLogo} alt="" aria-hidden="true" />
-          <span>Kimi Code Helper</span>
+          <span>Navo</span>
         </div>
         <div className="titlebar-controls">
           <div

@@ -532,7 +532,7 @@ export class Gateway {
               ? {
                   'kimi-code-helper': {
                     id: 'kimi-code-helper',
-                    name: 'Kimi Code Helper',
+                    name: 'Navo',
                     type: 'openai',
                     api: `http://${settings.lanSharing && isPrivateIPv4(req.socket.localAddress ?? '') ? req.socket.localAddress : '127.0.0.1'}:${settings.port}${harnessPath ? `/harness/${harnessPath[1]}` : ''}/v1`,
                     models: registryModels(

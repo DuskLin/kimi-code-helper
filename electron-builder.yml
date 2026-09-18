@@ -1,7 +1,7 @@
 appId: dev.kimicode.helper
-productName: Kimi Code Helper
-icon: src/renderer/src/assets/kimi-code-helper-logo.png
-artifactName: '${name}-${version}-${os}-${arch}.${ext}'
+productName: Navo
+icon: src/renderer/src/assets/navo-logo.png
+artifactName: 'Navo-${version}-${os}-${arch}.${ext}'
 directories:
   output: dist
 files:
@@ -11,14 +11,20 @@ asar: true
 publish:
   provider: github
   owner: DuskLin
-  repo: kimi-code-helper
+  repo: navo
 mac:
+  # Preserve the bundle filename required by existing macOS update clients.
+  executableName: Kimi Code Helper
   icon: build/icon.icns
   identity: '-'
   category: public.app-category.developer-tools
   target:
     - dmg
     - zip
+  # Existing installed versions require this exact ZIP name for automatic updates.
+  artifactName: 'kimi-code-helper-${version}-${os}-${arch}.${ext}'
+dmg:
+  artifactName: 'Navo-${version}-${os}-${arch}.${ext}'
 win:
   target:
     - nsis

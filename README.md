@@ -1,15 +1,17 @@
 <p align="center">
-  <img src="src/renderer/src/assets/kimi-code-helper-logo.png" alt="Kimi Code Helper 标志" width="88" />
+  <img src="src/renderer/src/assets/navo-logo.png" alt="Navo 标志" width="88" />
 </p>
 
-<h1 align="center">Kimi Code Helper</h1>
+<h1 align="center">Navo</h1>
+
+Navo 原名 Kimi Code Helper。改名后继续使用原有账号、配置和更新通道；为兼容旧版自动更新，macOS 的 `.app` 文件名、更新 ZIP 文件名及数据目录暂时保留旧名称，DMG 安装包使用 `Navo-版本号-mac-架构.dmg`。
 
 <p align="center">一个桌面应用，统一管理 Kimi Code、DeepSeek 与 OpenCode Go 账号、请求和用量。</p>
 
 <p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
 
 <p align="center">
-  <a href="https://github.com/DuskLin/kimi-code-helper/releases">下载安装包</a> ·
+  <a href="https://github.com/DuskLin/navo/releases">下载安装包</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#客户端接入">客户端接入</a> ·
   <a href="docs/reference.zh-CN.md">技术参考</a>
@@ -21,7 +23,7 @@
 
 ## 能做什么
 
-Kimi Code Helper 将多个供应商账号汇入本地账号池，通过 `127.0.0.1` 上的 HTTP 网关为编程助手提供统一入口。本机回环连接无需密钥，局域网客户端使用网关密钥，应用负责选择可用账号、转发请求和记录用量。
+Navo 将多个供应商账号汇入本地账号池，通过 `127.0.0.1` 上的 HTTP 网关为编程助手提供统一入口。本机回环连接无需密钥，局域网客户端使用网关密钥，应用负责选择可用账号、转发请求和记录用量。
 
 | 功能           | 说明                                                                                    |
 | -------------- | --------------------------------------------------------------------------------------- |
@@ -41,7 +43,7 @@ Kimi Code Helper 将多个供应商账号汇入本地账号池，通过 `127.0.0
 
 ## 界面预览
 
-应用启动后会显示状态栏／系统托盘图标。关闭主窗口会隐藏窗口，网关继续在后台运行；点击图标菜单中的「显示主窗口」可恢复界面，再次启动应用也会恢复已有窗口。需要完全退出并停止网关时，选择「退出 Kimi Code Helper」（macOS 也可使用 ⌘Q）。
+应用启动后会显示状态栏／系统托盘图标。关闭主窗口会隐藏窗口，网关继续在后台运行；点击图标菜单中的「显示主窗口」可恢复界面，再次启动应用也会恢复已有窗口。需要完全退出并停止网关时，选择「退出 Navo」（macOS 也可使用 ⌘Q）。
 
 状态栏图标空闲时为白色；网关正在处理请求时，蓝色光带沿 Logo 顺时针流转，悬停可查看当前请求数。所有请求结束后自动恢复白色。
 
@@ -50,6 +52,8 @@ Kimi Code Helper 将多个供应商账号汇入本地账号池，通过 `127.0.0
 点击右上角「额度／调度」切换视图。下面是实际操作录屏转换的循环动画 SVG：
 
 ![实时调度看板：客户端、会话及模型之间的双向请求流动](docs/images/live-flow-demo.svg)
+
+此动图录制于改名前，画面中的 Kimi Code Helper 即 Navo。
 
 - **实时拓扑**：按 Harness → 会话 → 模型展示真实网关请求。同一会话的主 Agent、子 Agent 与并发调用汇总到同一节点，模型名称及输入／输出 Token 随请求更新；不代表客户端内部独立 Agent 数量。
 - **双向连线**：青色向右表示上传，紫色向左表示响应下传；最近有实际收发事件时连线流动，节点背景保持静态。Token 以实际 usage 上报为准，未上报显示「—」。
@@ -91,13 +95,13 @@ Kimi Code Helper 将多个供应商账号汇入本地账号池，通过 `127.0.0
 
 ### 安装或从源码启动
 
-在 [Releases](https://github.com/DuskLin/kimi-code-helper/releases) 查看可用版本与附件。打包配置支持 macOS（DMG / ZIP）、Windows（NSIS EXE）和 Linux（AppImage）；macOS 使用 ad hoc 签名，尚未配置开发者证书签名和公证，Windows 尚未配置代码签名。
+在 [Releases](https://github.com/DuskLin/navo/releases) 查看可用版本与附件。打包配置支持 macOS（DMG / ZIP）、Windows（NSIS EXE）和 Linux（AppImage）；macOS 使用 ad hoc 签名，尚未配置开发者证书签名和公证，Windows 尚未配置代码签名。
 
 从源码运行需要 **Node.js 22.12.0 或更高版本**及 npm：
 
 ```bash
-git clone https://github.com/DuskLin/kimi-code-helper.git
-cd kimi-code-helper
+git clone https://github.com/DuskLin/navo.git
+cd navo
 npm ci
 npm run dev
 ```

@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix="recording-svg-") as temporary:
     duration = len(frames) / args.fps
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
-        '<title id="title">Kimi Code Helper — live gateway flow</title>',
+        '<title id="title">Navo — live gateway flow</title>',
         '<desc id="desc">Screen recording of the dark dashboard. Cyan connections show uploads; purple connections show responses. Embedded raster frames, not vectorized artwork.</desc>',
         '<style>@media (prefers-reduced-motion: reduce) { .frame { display: none; } }</style>',
         f'<image width="{width}" height="{height}" href="{data[0]}"/>',

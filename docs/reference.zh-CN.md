@@ -1,4 +1,4 @@
-# Kimi Code Helper · 技术参考
+# Navo · 技术参考
 
 [返回中文首页](../README.md) · [English README](../README.en.md)
 

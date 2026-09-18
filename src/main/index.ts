@@ -21,7 +21,9 @@ import { UpdateService } from './services/updates'
 import { UnsignedMacUpdater } from './services/mac-updater'
 import { createTray } from './tray'
 
-app.setName('Kimi Code Helper')
+app.setName('Navo')
+// Preserve existing accounts, settings and the single-instance lock across the rename.
+app.setPath('userData', join(app.getPath('appData'), 'Kimi Code Helper'))
 // 自动化验证使用临时目录，避免改变用户设置。
 if (process.env.KIMI_HELPER_TEST_USER_DATA)
   app.setPath('userData', process.env.KIMI_HELPER_TEST_USER_DATA)
@@ -70,7 +72,7 @@ function createWindow(): void {
     height: 760,
     minWidth: 640,
     minHeight: 440,
-    title: 'Kimi Code Helper',
+    title: 'Navo',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#151719' : '#f8f9fa',
     show: false,
     ...(process.platform === 'darwin'
@@ -165,7 +167,7 @@ void app
     })
     handle(IPC.updateInstall, () => updater.install())
     handle(IPC.updateOpenRelease, () =>
-      shell.openExternal('https://github.com/DuskLin/kimi-code-helper/releases/latest')
+      shell.openExternal('https://github.com/DuskLin/navo/releases/latest')
     )
     handle(IPC.appInfo, () => ({
       version: app.getVersion(),
@@ -248,7 +250,7 @@ void app
   .catch((error) => {
     console.error('应用启动失败：', error)
     dialog.showErrorBox(
-      'Kimi Code Helper 启动失败',
+      'Navo 启动失败',
       error instanceof Error ? error.message : '无法读取本地配置'
     )
     app.quit()

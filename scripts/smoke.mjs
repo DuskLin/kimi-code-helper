@@ -1075,7 +1075,7 @@ try {
   await Promise.all([
     application.waitForEvent('close'),
     application.evaluate(() => {
-      globalThis.smokeTrayMenu.items.find((item) => item.label === '退出 Kimi Code Helper').click()
+      globalThis.smokeTrayMenu.items.find((item) => item.label === '退出 Navo').click()
     })
   ])
   application = undefined

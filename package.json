@@ -1,9 +1,9 @@
 {
-  "name": "kimi-code-helper",
+  "name": "navo",
   "version": "0.2.2",
-  "description": "Kimi Code 多账号与性能管理桌面助手",
+  "description": "Navo：多供应商 AI 账号、模型与本地网关桌面管理工具",
   "main": "out/main/index.js",
-  "author": "Kimi Code Helper contributors",
+  "author": "Navo contributors",
   "license": "MIT",
   "private": true,
   "scripts": {

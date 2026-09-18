@@ -1,15 +1,17 @@
 <p align="center">
-  <img src="src/renderer/src/assets/kimi-code-helper-logo.png" alt="Kimi Code Helper logo" width="88" />
+  <img src="src/renderer/src/assets/navo-logo.png" alt="Navo logo" width="88" />
 </p>
 
-<h1 align="center">Kimi Code Helper</h1>
+<h1 align="center">Navo</h1>
+
+Navo was previously named Kimi Code Helper. Existing accounts, settings, and the update channel are preserved. The macOS `.app` filename, update ZIP filename, and data directory retain their legacy names for compatibility with installed versions; DMG installers use `Navo-VERSION-mac-ARCH.dmg`.
 
 <p align="center">One desktop app to manage Kimi Code, DeepSeek, and OpenCode Go accounts, requests, and usage.</p>
 
 <p align="center"><a href="README.md">简体中文</a> · <strong>English</strong></p>
 
 <p align="center">
-  <a href="https://github.com/DuskLin/kimi-code-helper/releases">Downloads</a> ·
+  <a href="https://github.com/DuskLin/navo/releases">Downloads</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#connect-your-client">Client setup</a> ·
   <a href="docs/reference.zh-CN.md">Technical reference (Chinese)</a>
@@ -21,7 +23,7 @@
 
 ## Features
 
-Kimi Code Helper combines provider accounts into a local pool and gives coding assistants a single HTTP gateway on `127.0.0.1`. Loopback clients do not need a key; LAN clients use a gateway key. The app selects an available account, forwards requests, and records usage.
+Navo combines provider accounts into a local pool and gives coding assistants a single HTTP gateway on `127.0.0.1`. Loopback clients do not need a key; LAN clients use a gateway key. The app selects an available account, forwards requests, and records usage.
 
 | Feature                | What it does                                                                                                                     |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -41,13 +43,15 @@ Kimi Code Helper combines provider accounts into a local pool and gives coding a
 
 ## Screenshots
 
-The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Kimi Code Helper” (Quit Kimi Code Helper) to stop the gateway and exit; macOS also supports ⌘Q.
+The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Navo” (Quit Navo) to stop the gateway and exit; macOS also supports ⌘Q.
 
 ### Live gateway dashboard
 
 Switch between **额度** (Quotas) and **调度** (Live flow) in the title bar. This looping SVG was converted from an actual screen recording:
 
 ![Live dashboard showing bidirectional traffic between clients, sessions, and models](docs/images/live-flow-demo.svg)
+
+This animation was recorded before the rename; Kimi Code Helper in the recording is now Navo.
 
 - **Live topology:** real gateway requests form Harness → session → model branches. Main-agent, subagent, and concurrent calls sharing a session use one node; this is not a count of internal agents. Model IDs and input/output token usage update with requests.
 - **Directional connections:** cyan flows right for uploads; purple flows left for responses. Animation reflects recent transfer events while node backgrounds stay static. Token counts use reported usage; missing values show “—”.
@@ -89,13 +93,13 @@ The app uses fixed upstream addresses and fetches model lists from each provider
 
 ### Install or run from source
 
-Check [Releases](https://github.com/DuskLin/kimi-code-helper/releases) for available versions and assets. Packaging targets include macOS (DMG / ZIP), Windows (NSIS EXE), and Linux (AppImage). macOS uses ad hoc signing; developer certificate signing and notarization are not configured. Windows code signing is not configured either.
+Check [Releases](https://github.com/DuskLin/navo/releases) for available versions and assets. Packaging targets include macOS (DMG / ZIP), Windows (NSIS EXE), and Linux (AppImage). macOS uses ad hoc signing; developer certificate signing and notarization are not configured. Windows code signing is not configured either.
 
 To run from source, install **Node.js 22.12.0 or later** and npm:
 
 ```bash
-git clone https://github.com/DuskLin/kimi-code-helper.git
-cd kimi-code-helper
+git clone https://github.com/DuskLin/navo.git
+cd navo
 npm ci
 npm run dev
 ```
