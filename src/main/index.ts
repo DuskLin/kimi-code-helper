@@ -218,6 +218,7 @@ void app
     handle(IPC.updateOpenRelease, () =>
       shell.openExternal('https://github.com/DuskLin/navo/releases/latest')
     )
+    handle(IPC.appOpenIssues, () => shell.openExternal('https://github.com/DuskLin/navo/issues'))
     handle(IPC.appInfo, () => ({
       version: app.getVersion(),
       platform: process.platform,

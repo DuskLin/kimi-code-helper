@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Link2, Moon, Sun } from 'lucide-react'
+import { Bug, Check, Link2, Moon, Sun } from 'lucide-react'
 import type { AppInfo, Theme } from '../../shared/contracts'
 import { GatewayPanel, type GatewayStatus, type GatewayPage } from './GatewayPanel'
 import appLogo from './assets/navo-logo.png'
@@ -192,7 +192,22 @@ export function App() {
             </div>
           )}
         </div>
-        <UpdateControl version={info?.version} />
+        <div className="statusbar-actions">
+          <button
+            type="button"
+            className="statusbar-copy"
+            title="在浏览器中打开 GitHub Issues 列表"
+            onClick={() => {
+              void window.navo.openIssuesPage().catch(() => {
+                setError('无法打开 Bug 反馈页面，请稍后重试。')
+              })
+            }}
+          >
+            <Bug size={13} aria-hidden="true" />
+            Bug 反馈
+          </button>
+          <UpdateControl version={info?.version} />
+        </div>
       </footer>
     </div>
   )

@@ -895,6 +895,7 @@ h1 {
   gap: 7px;
 }
 .statusbar-connection,
+.statusbar-actions,
 .statusbar-copy-actions {
   display: flex;
   align-items: center;

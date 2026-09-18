@@ -29,6 +29,7 @@ export interface HelperApi {
   checkForUpdates(): Promise<void>
   installUpdate(): Promise<void>
   openReleasePage(): Promise<void>
+  openIssuesPage(): Promise<void>
   getUsageStats(query: import('./usage').UsageQuery): Promise<import('./usage').UsageStats>
   getAppInfo(): Promise<AppInfo>
   getSettings(): Promise<AppSettings>
@@ -267,6 +268,7 @@ export const IPC = {
   updateInstall: 'update:install',
   updateOpenRelease: 'update:open-release',
   appInfo: 'app:info',
+  appOpenIssues: 'app:open-issues',
   settingsGet: 'settings:get',
   settingsSave: 'settings:save',
   gatewayGet: 'gateway:get',
