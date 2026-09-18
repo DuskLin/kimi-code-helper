@@ -1045,6 +1045,7 @@ test('real HTTP gateway: all nine ingress/model combinations, JSON/SSE, headers,
     assert.equal(gateway.scheduler.state(store.get().accounts[0].id).active, 0)
   } finally {
     await gateway.shutdown()
+    gateway.history.close()
     await close(upstream)
     await rm(dir, { recursive: true, force: true })
   }

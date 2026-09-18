@@ -87,8 +87,7 @@ test('OpenCode Go native routing, streaming, session headers, persistence and mo
   const calls: { url: string; headers: Headers; body: string }[] = []
   const models = ['glm-test', 'gpt-test', 'minimax-test']
   const events = 'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n'
-  const gateway = new Gateway(
-    f.store,
+  const gateway = f.createGateway(
     async (url, init) => {
       calls.push({
         url: String(url),
@@ -243,8 +242,7 @@ test('DeepSeek metadata uses isolated cache, official models and balance endpoin
 
 test('api.json exports a live authenticated Kimi Code registry without secrets', async () => {
   const f = await storeFixture()
-  const gateway = new Gateway(
-    f.store,
+  const gateway = f.createGateway(
     undefined,
     async () => Response.json({ data: [{ id: 'kimi-for-coding' }, { id: 'custom-model' }] }),
     async () =>
@@ -315,7 +313,6 @@ test('api.json exports a live authenticated Kimi Code registry without secrets',
     assert.equal((await fetch(url, { headers })).status, 403)
   } finally {
     await gateway.shutdown()
-    gateway.history.close()
     await f.cleanup()
   }
 })
@@ -325,8 +322,7 @@ test('mixed providers persist, route all protocols, preserve failed balance refr
   let available = true
   let balanceFails = false
   const forwarded: { url: string; key: string | null; body: string }[] = []
-  const gateway = new Gateway(
-    fixture.store,
+  const gateway = fixture.createGateway(
     async (url, init) => {
       forwarded.push({
         url: String(url),
@@ -470,7 +466,29 @@ async function storeFixture() {
     secrets = codec(),
     store = new GatewayStore(file, secrets)
   await store.load()
-  return { store, file, secrets, cleanup: () => rm(dir, { recursive: true, force: true }) }
+  const gateways: Gateway[] = []
+  return {
+    store,
+    file,
+    secrets,
+    createGateway(
+      request?: typeof fetch,
+      metadataRequest?: typeof fetch,
+      catalogRequest?: typeof fetch
+    ) {
+      const gateway = new Gateway(store, request, metadataRequest, catalogRequest)
+      gateways.push(gateway)
+      return gateway
+    },
+    async cleanup() {
+      // Windows cannot remove SQLite files until every connection is closed.
+      for (const gateway of gateways) {
+        await gateway.shutdown()
+        gateway.history.close()
+      }
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
 }
 
 test('rejected traffic does not write permanent history; accepted traffic still does', async () => {
@@ -501,7 +519,7 @@ test('shutdown aborts background metadata requests and does not start remaining 
   let calls = 0
   let aborted = false
   let offline = true
-  const gateway = new Gateway(f.store, undefined, async (_url, init) => {
+  const gateway = f.createGateway(undefined, async (_url, init) => {
     calls++
     if (!offline) return Response.json({ data: [{ id: 'm' }] })
     return new Promise((_resolve, reject) => {
@@ -531,7 +549,6 @@ test('shutdown aborts background metadata requests and does not start remaining 
     assert.equal(calls, 5)
   } finally {
     await gateway.shutdown()
-    gateway.history.close()
     await f.cleanup()
   }
 })
@@ -548,7 +565,7 @@ test(
     let holdModels = false
     let releaseModels: (() => void) | undefined
     let aborted = false
-    const gateway = new Gateway(f.store, undefined, async (url, init) => {
+    const gateway = f.createGateway(undefined, async (url, init) => {
       calls++
       if (String(url).endsWith('/models')) {
         if (holdModels) {
@@ -637,7 +654,6 @@ test(
     } finally {
       releaseModels?.()
       await gateway.shutdown()
-      gateway.history.close()
       await f.cleanup()
     }
   }
@@ -717,7 +733,7 @@ test('converted truncated tools report incomplete without cooling a healthy acco
 
 test('LAN sharing preserves loopback, requires authentication and advertises the reached address', async () => {
   const f = await storeFixture()
-  const gateway = new Gateway(f.store, undefined, undefined, async () => Response.json({}))
+  const gateway = f.createGateway(undefined, undefined, async () => Response.json({}))
   const reserved = await listen((_req, res) => res.end())
   await reserved.close()
   try {
@@ -784,7 +800,7 @@ test('LAN sharing preserves loopback, requires authentication and advertises the
 
 test('gateway key survives restarts; manual rotation revokes old key and persists new key', async () => {
   const f = await storeFixture()
-  const gateway = new Gateway(f.store)
+  const gateway = f.createGateway()
   const reserved = await listen((_req, res) => res.end())
   await reserved.close()
   try {
@@ -884,8 +900,7 @@ async function gatewayFixture(
   const reserved = await listen((_req, res) => res.end())
   const port = reserved.port
   await reserved.close()
-  const gateway = new Gateway(
-    fixture.store,
+  const gateway = fixture.createGateway(
     (input, init) => {
       const url = new URL(String(input))
       assert.equal(url.origin, 'https://api.kimi.com')
@@ -926,7 +941,6 @@ async function gatewayFixture(
     post,
     cleanup: async () => {
       await gateway.shutdown()
-      gateway.history.close()
       await upstream.close()
       await fixture.cleanup()
     }
@@ -1164,7 +1178,7 @@ test('后台额度刷新合并调用，保留粘性、手动并发、冷却及�
             ]
           })
   }
-  const gateway = new Gateway(f.store, metadata)
+  const gateway = f.createGateway(metadata)
   try {
     const a = account('a'),
       b = account('b')
@@ -1401,11 +1415,10 @@ test('Responses、Chat Completions、Messages 原路径、请求体及 JSON/SSE 
       ['medium', 'medium', 'low', 'low', 'high', 'high']
     )
     await f.gateway.setRunning(false)
-    const restored = new Gateway(f.store)
+    const restored = f.createGateway()
     assert.equal(restored.snapshot().requests.length, 6)
     assert.equal(restored.snapshot().requests[0].upstreamRequestId, 'upstream-trace')
     assert.equal(restored.snapshot().requests[0].reasoningEffort, 'medium')
-    restored.history.close()
   } finally {
     await f.cleanup()
   }
@@ -1450,9 +1463,8 @@ test('Kimi thinking.effort 记录、透传和持久化，标准强度优先且�
       [null, null, 'low', 'max']
     )
     await f.gateway.setRunning(false)
-    const restored = new Gateway(f.store)
+    const restored = f.createGateway()
     assert.equal(restored.snapshot().requests.at(-1)!.reasoningEffort, 'max')
-    restored.history.close()
   } finally {
     await f.cleanup()
   }
@@ -1807,7 +1819,7 @@ test('真实上游超时返回 504，释放槽位并记录冷却', async () => {
 test('启动端口冲突可恢复，密钥和端口设置保持一致', async () => {
   const f = await storeFixture()
   const occupied = await listen((_req, res) => res.end())
-  const gateway = new Gateway(f.store)
+  const gateway = f.createGateway()
   try {
     await gateway.saveSettings({ ...f.store.get().settings, port: occupied.port })
     const key = f.store.get().groups[0].key
@@ -1912,7 +1924,7 @@ test('模型响应无效时拒绝保存，用量接口不可用时保留模型�
 test('后台锁定官方地址与自动元数据，拒绝伪造配置且失败不覆盖已有账号', async () => {
   const f = await storeFixture()
   let calls = 0
-  const gateway = new Gateway(f.store, fetch, async (input, init) => {
+  const gateway = f.createGateway(fetch, async (input, init) => {
     calls++
     if (String(input).endsWith('/usages'))
       return Response.json({
@@ -1985,7 +1997,7 @@ test('按参考项目请求头读取 parallel.limit 与额度，真实并发用�
     // 模拟上个版本一小时前以内的缓存，也必须补查额度和真实并发。
     const original = account('quota-account')
     await f.store.saveAccount({ ...accountInput('quota-account') }, original.capabilities!)
-    const gateway = new Gateway(f.store, fetch, request)
+    const gateway = f.createGateway(fetch, request)
     await gateway.refreshStaleAccounts()
     const saved = f.store.get().accounts[0]
     assert.equal(saved.maxConcurrency, 30)
@@ -2074,7 +2086,7 @@ test('手动并发上限持久化、控制槽位，刷新保留且可恢复自�
       quota: null
     })
     await f.store.saveAccount({ ...f.store.get().accounts[0], concurrencyOverride: 4 })
-    const gateway = new Gateway(f.store, fetch, async (input) =>
+    const gateway = f.createGateway(fetch, async (input) =>
       String(input).endsWith('/models')
         ? Response.json({ data: [{ id: 'kimi-for-coding' }] })
         : Response.json({ parallel: { limit: 60 }, usage: { limit: 100, remaining: 80 } })
@@ -2245,8 +2257,7 @@ test('Kimi Code hosts and native platform fallback work through the ordinary gat
 test('deleted account models stay excluded after sync and restart, can be restored, and leave other accounts unchanged', async () => {
   const f = await storeFixture()
   let upstreamModels = ['keep', 'remove']
-  const gateway = new Gateway(
-    f.store,
+  const gateway = f.createGateway(
     undefined,
     async () => Response.json({ data: upstreamModels.map((id) => ({ id })) }),
     async () => Response.json({})
@@ -2291,7 +2302,6 @@ test('deleted account models stay excluded after sync and restart, can be restor
     await assert.rejects(gateway.saveAccount({ ...a, excludedModels: 'remove' }), /已删除模型列表/)
   } finally {
     await gateway.shutdown()
-    gateway.history.close()
     await f.cleanup()
   }
 })

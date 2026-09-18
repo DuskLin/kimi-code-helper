@@ -359,7 +359,7 @@ test('合并 CLI 数据库和旧目录，按索引核对项目并保留子会话
     assert.equal(scan.sessions.length, 3)
     assert.equal(scan.coverage?.matched, 3)
     assert.deepEqual(scan.coverage?.sources, ['CLI 数据库', '旧版 JSON'])
-    assert.ok(scan.sessions.some((s) => s.workspace.endsWith('/codedance-plugin-marketplace')))
+    assert.ok(scan.sessions.some((s) => s.workspace === join(root, 'codedance-plugin-marketplace')))
     const native = scan.sessions.find((s) => s.key === 'sqlite:sess_root')!
     assert.equal(native.title, 'Title sess_root')
     assert.equal(native.counts.subagents, 1)
