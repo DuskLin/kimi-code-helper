@@ -45,65 +45,6 @@ Navo combines provider accounts into a local pool and gives coding assistants a 
 | Desktop controls            | Light and dark themes, card visibility settings, and reorderable account cards                                                   |
 | Local storage               | Encrypt configuration with system secure storage; persist request summaries in SQLite without storing prompts or response bodies |
 
-## Screenshots
-
-The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Navo” (Quit Navo) to stop the gateway and exit; macOS also supports ⌘Q.
-
-### Phone dashboard
-
-Portrait mode uses a single column and bottom navigation. Open an account to inspect its quota windows, reset times, and usage trend. Landscape mode switches to two columns and top navigation. Account names come directly from your settings.
-
-<p align="center">
-  <img src="docs/images/dashboard-phone.png" alt="Phone portrait quota overview with account balances and low-quota warnings" width="300" />
-  <img src="docs/images/dashboard-phone-detail.png" alt="Phone account details showing remaining quota and reset time" width="300" />
-</p>
-
-### iPad dashboard
-
-Portrait mode displays two columns; landscape mode expands to three. Cards in each row have equal heights, and account details use a split layout.
-
-<p align="center">
-  <img src="docs/images/dashboard-ipad-portrait.png" alt="iPad portrait dashboard with two quota columns" width="360" />
-</p>
-
-![iPad landscape dashboard with three quota columns](docs/images/dashboard-ipad-landscape.png)
-
-> These are actual web UI screenshots captured at 2× resolution with emulated phone/iPad viewports and fixed demo data. They contain no real accounts, access codes, or public URLs. They are not photos of physical devices or a native iOS app. In normal use, the dashboard displays live data synchronized by the desktop app.
-
-### Live gateway dashboard
-
-Switch between **额度** (Quotas) and **调度** (Live flow) in the title bar. This looping SVG was converted from an actual screen recording:
-
-![Live dashboard showing bidirectional traffic between clients, sessions, and models](docs/images/live-flow-demo.svg)
-
-This animation was recorded before the rename; Kimi Code Helper in the recording is now Navo.
-
-- **Live topology:** real gateway requests form Harness → session → model branches. Main-agent, subagent, and concurrent calls sharing a session use one node; this is not a count of internal agents. Model IDs and input/output token usage update with requests.
-- **Directional connections:** cyan flows right for uploads; purple flows left for responses. Animation reflects recent transfer events while node backgrounds stay static. Token counts use reported usage; missing values show “—”.
-- **Idle retention:** after all requests finish, the Bot turns gray with an offline icon. Choose 5, 10, 15, 30, or 60 minutes using the toolbar slider; releasing it saves automatically. New calls reactivate the node; expired nodes disappear.
-- **Stable, responsive layout:** first-seen node ordering survives old-request cleanup. Nodes scale within size limits, with vertical scrolling for large graphs. The dashboard fills the content area and supports light and dark themes.
-- **Client identification:** includes Zcode, Kimi Code (CLI, desktop, VS Code), Claude Code, Codex, Qoder, WorkBuddy, Pi, DeepSeek Harness, and Cline, with Harness and model-family logos. Explicit attribution takes priority over UA matching. Generic UAs may need a [dedicated client URL](docs/harness-identification.md).
-
-The dashboard prefers explicit session IDs, falling back to available gateway session/cache identifiers. Requests without an identifier remain separate. The recording above is user-provided; the static screenshots below use smoke-test fixtures.
-
-### Dark overview
-
-Check account availability, quota windows, model performance, and token activity in one place.
-
-![Dark overview with account quota cards](docs/images/overview-dark.png)
-
-### Account configuration
-
-Select a provider and region, enter an API key, and sync upstream information. Use automatic or manual concurrency limits and configure supported upstream protocols per model.
-
-![Account editor with provider, region, API key, and concurrency settings](docs/images/account-editor.png)
-
-### Request history
-
-Inspect the account, request ID, model, reasoning effort, status, first-token latency, total latency, and cost for each request.
-
-![Request history with latency and cost columns](docs/images/request-history.png)
-
 ## Supported providers
 
 | Provider    | Account type                           | Synced information                                            |
@@ -136,33 +77,6 @@ npm run dev
 3. Start the gateway. It listens on `127.0.0.1:17300` by default. Stop it before changing the port if that port is occupied.
 4. Copy the address and **gateway key** from the account pool, or use **Kimi 配置** (Kimi config) / **Claude 配置** (Claude config).
 5. Configure a client using the examples below, then inspect the overview and request history after sending a request.
-
-## Remote quota dashboard
-
-Open **设置 → 远程仪表盘** (Settings → Remote dashboard) in the desktop app and enable the dashboard. The web page refreshes every 30 seconds and when brought back to the foreground, with manual refresh, light/dark themes, and connection/stale-data indicators. Keep the desktop app running; it can remain in the tray with its main window closed.
-
-1. **LAN access:** enable LAN access and open the displayed HTTPS address (default port `61948`). Before trusting the self-signed certificate, compare its SHA-256 fingerprint with the value under certificate/access management.
-2. **Public access:** select a temporary link or a fixed domain, then save and apply. The connector is bundled with the app. A fixed domain requires your Cloudflare domain and a dedicated Tunnel Token; see the [configuration guide](docs/mobile-dashboard.md) (Chinese).
-3. **Sign in:** copy the access code from the desktop app, open the address in a phone or iPad browser, and enter the code. Share the URL and code separately. Sessions last up to eight hours; rotating the access code immediately revokes existing sessions.
-
-Temporary links change whenever the connector restarts. **An online connector does not guarantee that the public URL is ready.** DNS/edge propagation, proxies, and cached results can cause a delay. Wait for the public reachability check to pass. Failed checks retry every 15 seconds, or you can retry manually; repeatedly restarting the connector creates more new URLs.
-
-The dashboard has its own read-only server and access code, separate from the inference gateway and its keys. It does not expose API keys, group keys, request bodies, or management APIs. Access codes and Tunnel credentials are encrypted with system secure storage. See the [dashboard guide](docs/mobile-dashboard.md) for security boundaries, fixed-domain configuration, and troubleshooting.
-
-## How it works
-
-```mermaid
-flowchart LR
-    A["Kimi CLI / Claude Code / HTTP client"] --> B["Local gateway · Auth and model matching"]
-    B --> C["Account scheduler · Sessions / Concurrency / Quotas"]
-    C --> D["Protocol adapter · Passthrough or conversion"]
-    D --> E["Kimi Code"]
-    D --> F["DeepSeek"]
-    D --> G["OpenCode Go"]
-    B -.-> H["Local request summaries and usage"]
-```
-
-Sessions stay on an available account to preserve cache benefits. The scheduler reassigns a session when its account is at capacity, out of quota, unavailable due to authentication failure, or cooling down. Connection failures and selected HTTP errors can trigger retries; **requests are never retried after the response has started**. Provide a stable session identifier using `X-Session-Id` or `prompt_cache_key`; bindings are isolated by model.
 
 ## Connect your client
 
@@ -225,6 +139,92 @@ curl http://127.0.0.1:17300/v1/chat/completions \
 | POST   | `/v1/messages/count_tokens` | Token counting; locally estimated for OpenCode Go |
 
 Authentication accepts `Authorization: Bearer …` or `x-api-key`. OpenCode Go's local token estimates include the response header `x-token-count-estimated: true`.
+
+## Remote quota dashboard
+
+Open **设置 → 远程仪表盘** (Settings → Remote dashboard) in the desktop app and enable the dashboard. The web page refreshes every 30 seconds and when brought back to the foreground, with manual refresh, light/dark themes, and connection/stale-data indicators. Keep the desktop app running; it can remain in the tray with its main window closed.
+
+1. **LAN access:** enable LAN access and open the displayed HTTPS address (default port `61948`). Before trusting the self-signed certificate, compare its SHA-256 fingerprint with the value under certificate/access management.
+2. **Public access:** select a temporary link or a fixed domain, then save and apply. The connector is bundled with the app. A fixed domain requires your Cloudflare domain and a dedicated Tunnel Token; see the [configuration guide](docs/mobile-dashboard.md) (Chinese).
+3. **Sign in:** copy the access code from the desktop app, open the address in a phone or iPad browser, and enter the code. Share the URL and code separately. Sessions last up to eight hours; rotating the access code immediately revokes existing sessions.
+
+Temporary links change whenever the connector restarts. **An online connector does not guarantee that the public URL is ready.** DNS/edge propagation, proxies, and cached results can cause a delay. Wait for the public reachability check to pass. Failed checks retry every 15 seconds, or you can retry manually; repeatedly restarting the connector creates more new URLs.
+
+The dashboard has its own read-only server and access code, separate from the inference gateway and its keys. It does not expose API keys, group keys, request bodies, or management APIs. Access codes and Tunnel credentials are encrypted with system secure storage. See the [dashboard guide](docs/mobile-dashboard.md) for security boundaries, fixed-domain configuration, and troubleshooting.
+
+## Screenshots
+
+The app adds a menu bar / system tray icon on launch. Closing the main window hides it while the gateway keeps running in the background. Choose “显示主窗口” (Show main window) from the icon menu, or launch the app again, to restore it. Choose “退出 Navo” (Quit Navo) to stop the gateway and exit; macOS also supports ⌘Q.
+
+### Phone dashboard
+
+Portrait mode uses a single column and bottom navigation. Open an account to inspect its quota windows, reset times, and usage trend. Landscape mode switches to two columns and top navigation. Account names come directly from your settings.
+
+<p align="center">
+  <img src="docs/images/dashboard-phone.png" alt="Phone portrait quota overview with account balances and low-quota warnings" width="300" />
+  <img src="docs/images/dashboard-phone-detail.png" alt="Phone account details showing remaining quota and reset time" width="300" />
+</p>
+
+### iPad dashboard
+
+Portrait mode displays two columns; landscape mode expands to three. Cards in each row have equal heights, and account details use a split layout.
+
+<p align="center">
+  <img src="docs/images/dashboard-ipad-portrait.png" alt="iPad portrait dashboard with two quota columns" width="360" />
+</p>
+
+![iPad landscape dashboard with three quota columns](docs/images/dashboard-ipad-landscape.png)
+
+> These are actual web UI screenshots captured at 2× resolution with emulated phone/iPad viewports and fixed demo data. They contain no real accounts, access codes, or public URLs. They are not photos of physical devices or a native iOS app. In normal use, the dashboard displays live data synchronized by the desktop app.
+
+### Live gateway dashboard
+
+Switch between **额度** (Quotas) and **调度** (Live flow) in the title bar. This looping SVG was converted from an actual screen recording:
+
+![Live dashboard showing bidirectional traffic between clients, sessions, and models](docs/images/live-flow-demo.svg)
+
+This animation was recorded before the rename; Kimi Code Helper in the recording is now Navo.
+
+- **Live topology:** real gateway requests form Harness → session → model branches. Main-agent, subagent, and concurrent calls sharing a session use one node; this is not a count of internal agents. Model IDs and input/output token usage update with requests.
+- **Directional connections:** cyan flows right for uploads; purple flows left for responses. Animation reflects recent transfer events while node backgrounds stay static. Token counts use reported usage; missing values show “—”.
+- **Idle retention:** after all requests finish, the Bot turns gray with an offline icon. Choose 5, 10, 15, 30, or 60 minutes using the toolbar slider; releasing it saves automatically. New calls reactivate the node; expired nodes disappear.
+- **Stable, responsive layout:** first-seen node ordering survives old-request cleanup. Nodes scale within size limits, with vertical scrolling for large graphs. The dashboard fills the content area and supports light and dark themes.
+- **Client identification:** includes Zcode, Kimi Code (CLI, desktop, VS Code), Claude Code, Codex, Qoder, WorkBuddy, Pi, DeepSeek Harness, and Cline, with Harness and model-family logos. Explicit attribution takes priority over UA matching. Generic UAs may need a [dedicated client URL](docs/harness-identification.md).
+
+The dashboard prefers explicit session IDs, falling back to available gateway session/cache identifiers. Requests without an identifier remain separate. The recording above is user-provided; the static screenshots below use smoke-test fixtures.
+
+### Dark overview
+
+Check account availability, quota windows, model performance, and token activity in one place.
+
+![Dark overview with account quota cards](docs/images/overview-dark.png)
+
+### Account configuration
+
+Select a provider and region, enter an API key, and sync upstream information. Use automatic or manual concurrency limits and configure supported upstream protocols per model.
+
+![Account editor with provider, region, API key, and concurrency settings](docs/images/account-editor.png)
+
+### Request history
+
+Inspect the account, request ID, model, reasoning effort, status, first-token latency, total latency, and cost for each request.
+
+![Request history with latency and cost columns](docs/images/request-history.png)
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["Kimi CLI / Claude Code / HTTP client"] --> B["Local gateway · Auth and model matching"]
+    B --> C["Account scheduler · Sessions / Concurrency / Quotas"]
+    C --> D["Protocol adapter · Passthrough or conversion"]
+    D --> E["Kimi Code"]
+    D --> F["DeepSeek"]
+    D --> G["OpenCode Go"]
+    B -.-> H["Local request summaries and usage"]
+```
+
+Sessions stay on an available account to preserve cache benefits. The scheduler reassigns a session when its account is at capacity, out of quota, unavailable due to authentication failure, or cooling down. Connection failures and selected HTTP errors can trigger retries; **requests are never retried after the response has started**. Provide a stable session identifier using `X-Session-Id` or `prompt_cache_key`; bindings are isolated by model.
 
 ## Limits and data storage
 
@@ -292,6 +292,12 @@ macOS downloads the ZIP for the running architecture, verifies its SHA-512 check
 
 CI publishes installers, blockmaps and update manifests, merging both Mac architectures into `latest-mac.yml`. Prefer publishing the draft after all assets have uploaded. Keep ZIP files and update manifests attached. Install the first version containing this feature manually; subsequent higher versions can update in-app. The source is public GitHub Releases; no GitHub token is embedded in the client.
 
+### Windows / Linux release validation
+
+Pull requests build all platforms without publishing. Releases include macOS x64/arm64 DMG and ZIP, Windows x64 NSIS EXE, and Linux x64 AppImage. Windows CI silently installs the final EXE and launches the installed application. Linux CI launches the final AppImage through FUSE on Ubuntu 22.04 with Xvfb, D-Bus and an unlocked GNOME Keyring. `npm run test:installed` checks the window/preload, real credential encryption, persistence across restart, HTTP gateway forwarding, SQLite history, dashboard assets and the bundled cloudflared executable. Only upstream transport uses a local fixture. Failures block release uploads; diagnostics are retained in `installation-check-*` artifacts.
+
+Linux requires FUSE 2, executable permission on the AppImage and an unlocked Secret Service/KWallet desktop keyring. Minimal environments without a keyring cannot save accounts. Kimi Code desktop quota integration remains macOS-only. These checks do not cover every Linux distribution, real provider credentials, public Tunnel connectivity, Windows signing reputation prompts, or the complete Windows/Linux update-installation flow. Treat platform support as unverified until the new native CI jobs pass.
+
 ## Further reading
 
 - [Protocol conversion implementation](docs/protocol-conversion.zh-CN.md): request mapping, tool history, streaming state machine, usage, and error handling (Chinese).
@@ -301,9 +307,3 @@ CI publishes installers, blockmaps and update manifests, merging both Mac archit
 ## License
 
 [MIT](LICENSE)
-
-### Windows / Linux release validation
-
-Pull requests build all platforms without publishing. Releases include macOS x64/arm64 DMG and ZIP, Windows x64 NSIS EXE, and Linux x64 AppImage. Windows CI silently installs the final EXE and launches the installed application. Linux CI launches the final AppImage through FUSE on Ubuntu 22.04 with Xvfb, D-Bus and an unlocked GNOME Keyring. `npm run test:installed` checks the window/preload, real credential encryption, persistence across restart, HTTP gateway forwarding, SQLite history, dashboard assets and the bundled cloudflared executable. Only upstream transport uses a local fixture. Failures block release uploads; diagnostics are retained in `installation-check-*` artifacts.
-
-Linux requires FUSE 2, executable permission on the AppImage and an unlocked Secret Service/KWallet desktop keyring. Minimal environments without a keyring cannot save accounts. Kimi Code desktop quota integration remains macOS-only. These checks do not cover every Linux distribution, real provider credentials, public Tunnel connectivity, Windows signing reputation prompts, or the complete Windows/Linux update-installation flow. Treat platform support as unverified until the new native CI jobs pass.
