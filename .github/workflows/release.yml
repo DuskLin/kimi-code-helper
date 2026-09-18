@@ -1,6 +1,7 @@
 name: Build and release
 
 on:
+  pull_request:
   push:
     tags:
       - 'v[0-9]*'
@@ -27,7 +28,7 @@ jobs:
   build:
     name: Build ${{ matrix.platform }} ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -38,20 +39,32 @@ jobs:
           - os: macos-15
             platform: mac
             arch: arm64
+          - os: windows-2022
+            platform: win
+            arch: x64
+          - os: ubuntu-22.04
+            platform: linux
+            arch: x64
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ref: ${{ github.event_name == 'pull_request' && github.ref || format('refs/tags/{0}', env.RELEASE_TAG) }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libfuse2 libsecret-1-0 gnome-keyring dbus-x11 libgtk-3-0 libnss3 libasound2
       - name: Set package version from tag
+        if: github.event_name != 'pull_request'
         run: |
           # npm validates the version; only the runner's working copy is changed.
           VERSION="${RELEASE_TAG#v}"
@@ -62,11 +75,30 @@ jobs:
           npm version "$VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
       - run: npm run test:unit
       - name: Test macOS update installation
+        if: runner.os == 'macOS'
         run: npm run test:update:mac
       - name: Build installers
         run: npm run dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Test installed Windows application
+        if: runner.os == 'Windows'
+        run: npm run test:installed
+      - name: Test Linux AppImage with a real keyring
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- xvfb-run -a bash -euo pipefail -c '
+            export XDG_CURRENT_DESKTOP=GNOME
+            eval "$(printf "ci-test-password" | gnome-keyring-daemon --unlock --components=secrets)"
+            npm run test:installed
+          '
+      - name: Save installation diagnostics
+        if: always() && runner.os != 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installation-check-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifacts/installed
+          if-no-files-found: ignore
       - name: Save installers
         uses: actions/upload-artifact@v4
         with:
@@ -74,6 +106,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
+            dist/*.exe
+            dist/*.AppImage
             dist/*.dmg
             dist/*.zip
             dist/*.blockmap
@@ -82,6 +116,7 @@ jobs:
 
   release:
     name: Upload release assets
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -101,7 +136,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - uses: actions/download-artifact@v4
         with:
-          pattern: installers-mac-*
+          pattern: installers-*
           path: build-artifacts
       - name: Merge and verify update manifests
         run: node scripts/prepare-release.mjs build-artifacts installers
@@ -129,6 +164,6 @@ jobs:
           fi
           # Upload update metadata last, so clients never discover missing installer assets.
           shopt -s nullglob
-          ASSETS=(installers/*.dmg installers/*.zip installers/*.blockmap)
+          ASSETS=(installers/*.dmg installers/*.zip installers/*.exe installers/*.AppImage installers/*.blockmap)
           gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
           gh release upload "$RELEASE_TAG" installers/*.yml --clobber

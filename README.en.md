@@ -269,14 +269,14 @@ docs/                   # Technical reference, protocol audit, README images
 
 ## Packaging and releases
 
-Normally, run `npm run dist` on the target operating system. The repository's [release workflow](.github/workflows/release.yml) runs when you push a version tag starting with `v` or publish a GitHub Release. It builds only macOS x64 (Intel) and arm64 (Apple Silicon) DMG / ZIP installers. You can also run the workflow manually from Actions with an existing tag, without moving that tag.
+Normally, run `npm run dist` on the target operating system. The repository's [release workflow](.github/workflows/release.yml) runs when you push a version tag starting with `v` or publish a GitHub Release. It builds macOS x64 (Intel) and arm64 (Apple Silicon) DMG / ZIP installers, Windows x64 NSIS EXE, and Linux x64 AppImage. You can also run the workflow manually from Actions with an existing tag, without moving that tag.
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Choose a new, unpublished version number. Pushing a tag creates a draft Release if needed and uploads assets. Publishing an existing Release preserves its title and handwritten notes while refreshing generated notes and assets. Release assets are uploaded only after both Mac architecture builds succeed; Actions artifacts are retained for 14 days.
+Choose a new, unpublished version number. Pushing a tag creates a draft Release if needed and uploads assets. Publishing an existing Release preserves its title and handwritten notes while refreshing generated notes and assets. Release assets are uploaded only after all platform builds and installation checks succeed; Actions artifacts are retained for 14 days.
 
 Run `npm run test:update:mac` on macOS with compiler tools to verify checksum rejection, staging, replacement, relaunch and backup using an isolated test app. This does not replace your installed application.
 
@@ -301,3 +301,9 @@ CI publishes installers, blockmaps and update manifests, merging both Mac archit
 ## License
 
 [MIT](LICENSE)
+
+### Windows / Linux release validation
+
+Pull requests build all platforms without publishing. Releases include macOS x64/arm64 DMG and ZIP, Windows x64 NSIS EXE, and Linux x64 AppImage. Windows CI silently installs the final EXE and launches the installed application. Linux CI launches the final AppImage through FUSE on Ubuntu 22.04 with Xvfb, D-Bus and an unlocked GNOME Keyring. `npm run test:installed` checks the window/preload, real credential encryption, persistence across restart, HTTP gateway forwarding, SQLite history, dashboard assets and the bundled cloudflared executable. Only upstream transport uses a local fixture. Failures block release uploads; diagnostics are retained in `installation-check-*` artifacts.
+
+Linux requires FUSE 2, executable permission on the AppImage and an unlocked Secret Service/KWallet desktop keyring. Minimal environments without a keyring cannot save accounts. Kimi Code desktop quota integration remains macOS-only. These checks do not cover every Linux distribution, real provider credentials, public Tunnel connectivity, Windows signing reputation prompts, or the complete Windows/Linux update-installation flow. Treat platform support as unverified until the new native CI jobs pass.

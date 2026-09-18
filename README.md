@@ -282,14 +282,14 @@ docs/                   # 技术参考、协议审计与 README 配图
 
 ## 打包与发布
 
-通常在对应操作系统上运行 `npm run dist`。仓库的 [发布工作流](.github/workflows/release.yml) 会在推送 `v` 开头的版本 tag 或发布 GitHub Release 时触发，仅构建 macOS x64（Intel）与 arm64（Apple Silicon）的 DMG / ZIP 安装包。也可在 Actions 页面手动运行工作流，填写已有 tag 来重新打包，无需移动标签。
+通常在对应操作系统上运行 `npm run dist`。仓库的 [发布工作流](.github/workflows/release.yml) 会在推送 `v` 开头的版本 tag 或发布 GitHub Release 时触发，构建 macOS x64（Intel）与 arm64（Apple Silicon）的 DMG / ZIP、Windows x64 的 NSIS EXE 和 Linux x64 的 AppImage。也可在 Actions 页面手动运行工作流，填写已有 tag 来重新打包，无需移动标签。
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题和手写说明，更新自动摘要及附件。两种 Mac 架构均构建成功后才上传 Release 附件，Actions 产物保留 14 天。
+请使用尚未发布的新版本号。推送 tag 会创建 Release 草稿（不存在时）并上传附件；发布已有 Release 会保留标题和手写说明，更新自动摘要及附件。全部平台构建和安装检查成功后才上传 Release 附件，Actions 产物保留 14 天。
 
 每次发布会自动生成中文的“新增功能 / 问题修复 / 其他改进”摘要，重跑时更新自动摘要并保留手写说明。支持中文提交说明、`Release-Note-zh` 提交正文及版本级说明文件，详见 [中文发布说明](release-notes/README.md)。
 
@@ -312,3 +312,9 @@ CI 会上传安装包、blockmap 和更新清单，并合并 macOS 两种架构�
 ## 许可证
 
 [MIT](LICENSE)
+
+### Windows / Linux 发布验证
+
+PR 会构建全部平台但不发布；版本发布必须等所有平台检查通过。Windows CI 静默安装最终 NSIS EXE，再启动安装目录中的应用；Linux CI 在 Ubuntu 22.04 的 Xvfb、D-Bus、GNOME Keyring 环境中通过 FUSE 启动最终 AppImage。`npm run test:installed` 检查真实窗口和 preload、系统加密存储、账号保存及重启恢复、网关 HTTP 转发、SQLite 历史、仪表盘资源和内置 cloudflared 的可执行性。上游使用本地测试服务，不需要真实 API Key。失败会阻止上传 Release 附件，诊断记录见 Actions 的 `installation-check-*` 附件。
+
+支持范围：Windows x64、具备 FUSE 2 和已解锁 Secret Service / KWallet 的 Linux x64 桌面。AppImage 下载后需赋予执行权限；Ubuntu 22.04 可安装 `libfuse2 gnome-keyring`。无密钥环的精简 Linux 环境不能保存账号。Kimi Code 桌面额度集成仍仅支持 macOS。CI 不涵盖所有发行版、真实供应商账号、公网 Tunnel 连通性、Windows 签名信誉提示或 Windows/Linux 自动更新安装全流程；新增任务首次运行通过前，不应视为这些平台已验证可用。

@@ -28,6 +28,25 @@ test('release manifests merge both Mac architectures and reject corrupt assets',
         })
       )
     }
+    for (const [platform, extension, manifestName] of [
+      ['win', 'exe', 'latest.yml'],
+      ['linux', 'AppImage', 'latest-linux.yml']
+    ]) {
+      const directory = join(source, `${platform}-x64`)
+      await mkdir(directory, { recursive: true })
+      const url = `Navo-0.2.0-${platform}-x64.${extension}`
+      const data = Buffer.from(platform)
+      await writeFile(join(directory, url), data)
+      await writeFile(
+        join(directory, manifestName),
+        stringify({
+          version: '0.2.0',
+          files: [
+            { url, size: data.length, sha512: createHash('sha512').update(data).digest('base64') }
+          ]
+        })
+      )
+    }
     const run = (out: string) =>
       promisify(execFile)(process.execPath, [
         resolve('scripts/prepare-release.mjs'),
@@ -39,6 +58,15 @@ test('release manifests merge both Mac architectures and reject corrupt assets',
     assert.equal(manifest.files.length, 2)
     assert.ok(manifest.files.some((file: { url: string }) => file.url.includes('arm64')))
     assert.ok(manifest.files.some((file: { url: string }) => file.url.includes('x64')))
+    for (const [name, extension] of [
+      ['latest.yml', 'exe'],
+      ['latest-linux.yml', 'AppImage']
+    ]) {
+      const platformManifest = parse(await readFile(join(dir, 'valid', name), 'utf8'))
+      assert.equal(platformManifest.files.length, 1)
+      assert.ok(platformManifest.path.endsWith(`.${extension}`))
+      await readFile(join(dir, 'valid', platformManifest.path))
+    }
     await writeFile(join(source, 'mac-arm64/Navo-0.2.0-mac-arm64.zip'), 'corrupt')
     await assert.rejects(run('invalid'), /checksum/)
   } finally {
