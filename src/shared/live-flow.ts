@@ -106,7 +106,10 @@ export function identifyHarness(headers: HarnessHeaders, explicitId?: string): s
       : ''
   }
   const explicit =
-    harnessById(explicitId ?? '') ?? harnessById(read('x-kimi-helper-harness').toLowerCase())
+    harnessById(explicitId ?? '') ??
+    harnessById(read('x-navo-harness').toLowerCase()) ??
+    // Accept the legacy header for clients configured before the rename.
+    harnessById(read('x-kimi-helper-harness').toLowerCase())
   if (explicit) return explicit.name
   // Kimi's host identity contract covers CLI, desktop and VS Code.
   // Only exact product platforms count; generic Moonshot/API headers do not.

@@ -70,7 +70,8 @@ import { UsageDashboard } from './UsageDashboard'
 import type { UsageStats } from '../../shared/usage'
 import { performanceHistoryRange } from '../../shared/usage'
 
-const api = window.kimiHelper
+const api = window.navo
+// Keep the persisted key so existing Navo display preferences survive the rename.
 const cardDisplayKey = 'kimi-helper.card-display'
 function readCardDisplay(): {
   estimates: boolean

@@ -22,7 +22,7 @@ export class UnsignedMacUpdater extends AppUpdater {
 
   protected async doDownloadUpdate(options: DownloadUpdateOptions): Promise<string[]> {
     const { info, provider } = options.updateInfoAndProvider
-    const expected = `kimi-code-helper-${info.version}-mac-${process.arch}.zip`
+    const expected = `Navo-${info.version}-mac-${process.arch}.zip`
     const file = provider.resolveFiles(info).find((entry) => entry.info.url === expected)
     if (!file || !file.info.sha512) throw new Error('发布版本缺少当前架构的更新文件')
     const executor = new ElectronHttpExecutor()
@@ -43,21 +43,21 @@ export class UnsignedMacUpdater extends AppUpdater {
         await access(target, constants.W_OK)
         if (!target.endsWith('.app') || target.startsWith('/Volumes/'))
           throw new Error('请先将应用安装到 Applications 后再更新')
-        const directory = await mkdtemp(join(parent, '.kimi-helper-update-'))
+        const directory = await mkdtemp(join(parent, '.navo-update-'))
         try {
           const { stdout } = await exec('/usr/bin/unzip', ['-Z1', event.downloadedFile], {
             maxBuffer: 16 * 1024 * 1024
           })
           validateMacArchive(stdout.trimEnd().split('\n'))
           await exec('/usr/bin/ditto', ['-x', '-k', event.downloadedFile, directory])
-          const staged = join(directory, 'Kimi Code Helper.app')
+          const staged = join(directory, 'Navo.app')
           const plist = join(staged, 'Contents/Info.plist')
           const readKey = async (key: string) =>
             (
               await exec('/usr/bin/plutil', ['-extract', key, 'raw', '-o', '-', plist])
             ).stdout.trim()
           if (
-            (await readKey('CFBundleIdentifier')) !== 'dev.kimicode.helper' ||
+            (await readKey('CFBundleIdentifier')) !== 'dev.navo.app' ||
             (await readKey('CFBundleShortVersionString')) !== info.version
           )
             throw new Error('更新应用的标识或版本不匹配')

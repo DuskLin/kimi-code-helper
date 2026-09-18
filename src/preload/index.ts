@@ -38,4 +38,4 @@ const api: HelperApi = {
   rotateGatewayKey: (groupId) => ipcRenderer.invoke(IPC.connectionRotate, groupId),
   copyConnection: (input) => ipcRenderer.invoke(IPC.connectionCopy, input)
 }
-contextBridge.exposeInMainWorld('kimiHelper', api)
+contextBridge.exposeInMainWorld('navo', api)

@@ -173,20 +173,20 @@ These examples use the default port. Replace `<GATEWAY_KEY>` with the gateway ke
 Use **Kimi 配置** to copy the configuration. Merge it into `~/.kimi/config.toml`, keeping your other settings. Place `default_model` at the top level of the file:
 
 ```toml
-default_model = "kimi-helper"
+default_model = "navo"
 
-[providers.kimi-helper]
+[providers.navo]
 type = "kimi"
 base_url = "http://127.0.0.1:17300/v1"
 api_key = "<GATEWAY_KEY>"
 
-[models.kimi-helper]
-provider = "kimi-helper"
+[models.navo]
+provider = "navo"
 model = "kimi-for-coding"
 max_context_size = 262144
 ```
 
-You can also select the model with `kimi --model kimi-helper`. When switching models, update the model ID and its context settings accordingly.
+You can also select the model with `kimi --model navo`. When switching models, update the model ID and its context settings accordingly.
 
 ### Claude Code / Anthropic clients
 
@@ -286,7 +286,9 @@ Each release receives Chinese notes grouped into new features, fixes, and other 
 
 Installed builds check GitHub stable releases 10 seconds after launch and every six hours afterward. Use the bottom-right update button to check manually. New versions download in the background; click **Restart and install** when ready. Restarting interrupts active gateway requests but preserves accounts and settings. Development builds do not check for updates, and prereleases are excluded.
 
-macOS downloads the ZIP for the running architecture, verifies its SHA-512 checksum, bundle ID and version, then replaces the app after exit without requiring an Apple Developer certificate. Install the app in a writable directory first, rather than running from a DMG. Replacement or launch-command failures restore the old app; a backup remains beside the installation in `.kimi-helper-update-*/previous.app`. Remove that backup directory after verifying the new version. Windows uses NSIS; Linux requires a writable AppImage.
+The app bundle, bundle ID and update ZIP now use the Navo identity. Versions using the old bundle name require one manual installation of `Navo.app`; their updater cannot recognize the new names. The registry provider ID and copied configuration examples now use `navo`. Existing clients can continue using the gateway URL; select the new provider when importing again.
+
+macOS downloads the ZIP for the running architecture, verifies its SHA-512 checksum, bundle ID and version, then replaces the app after exit without requiring an Apple Developer certificate. Install the app in a writable directory first, rather than running from a DMG. Replacement or launch-command failures restore the old app; a backup remains beside the installation in `.navo-update-*/previous.app`. Remove that backup directory after verifying the new version. Windows uses NSIS; Linux requires a writable AppImage.
 
 CI publishes installers, blockmaps and update manifests, merging both Mac architectures into `latest-mac.yml`. Prefer publishing the draft after all assets have uploaded. Keep ZIP files and update manifests attached. Install the first version containing this feature manually; subsequent higher versions can update in-app. The source is public GitHub Releases; no GitHub token is embedded in the client.
 

@@ -31,7 +31,7 @@ const reservation = createServer()
 await new Promise((resolve) => reservation.listen(0, '127.0.0.1', resolve))
 const port = reservation.address().port
 await new Promise((resolve) => reservation.close(resolve))
-const env = { ...process.env, KIMI_HELPER_TEST_USER_DATA: directory }
+const env = { ...process.env, NAVO_TEST_USER_DATA: directory }
 delete env.ELECTRON_RUN_AS_NODE
 let application
 const requests = []
@@ -45,11 +45,11 @@ async function waitFor(predicate) {
 try {
   application = await electron.launch({ args: [entry], env })
   const page = await application.firstWindow()
-  await page.waitForFunction(() => !!window.kimiHelper)
+  await page.waitForFunction(() => !!window.navo)
   await page.evaluate(async (port) => {
-    const snapshot = await window.kimiHelper.getGateway()
-    await window.kimiHelper.saveGateway({ ...snapshot.settings, port })
-    await window.kimiHelper.setGatewayRunning(true)
+    const snapshot = await window.navo.getGateway()
+    await window.navo.saveGateway({ ...snapshot.settings, port })
+    await window.navo.setGatewayRunning(true)
   }, port)
   const idle = await application.evaluate(() => globalThis.frames.at(-1))
   for (let index = 0; index < 2; index++) {

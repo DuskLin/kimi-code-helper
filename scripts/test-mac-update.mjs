@@ -17,8 +17,8 @@ const exec = promisify(execFile)
 const root = await mkdtemp(join(tmpdir(), 'kimi-update-integration-'))
 let server
 try {
-  const staged = join(root, 'release/Kimi Code Helper.app')
-  const installed = join(root, 'installed/Kimi Code Helper.app')
+  const staged = join(root, 'release/Navo.app')
+  const installed = join(root, 'installed/Navo.app')
   await mkdir(join(staged, 'Contents/MacOS'), { recursive: true })
   await mkdir(join(root, 'user-data'))
   const marker = join(root, 'launched-new-version')
@@ -29,11 +29,11 @@ try {
   )
   await exec('/usr/bin/clang', [source, '-o', join(staged, 'Contents/MacOS/fixture')])
   const plist = (version) =>
-    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.kimicode.helper</string><key>CFBundleExecutable</key><string>fixture</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string></dict></plist>`
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.navo.app</string><key>CFBundleExecutable</key><string>fixture</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string></dict></plist>`
   await writeFile(join(staged, 'Contents/Info.plist'), plist('0.2.0'))
   await cp(staged, installed, { recursive: true })
   await writeFile(join(installed, 'Contents/Info.plist'), plist('0.1.0'))
-  const name = `kimi-code-helper-0.2.0-mac-${process.arch}.zip`
+  const name = `Navo-0.2.0-mac-${process.arch}.zip`
   const zip = join(root, name)
   await exec('/usr/bin/ditto', ['-c', '-k', '--keepParent', staged, zip])
   const data = await readFile(zip)
@@ -74,7 +74,7 @@ try {
   }
   await run()
   assert.match(await readFile(join(installed, 'Contents/Info.plist'), 'utf8'), /0\.1\.0/)
-  assert.deepEqual(await readdir(join(root, 'installed')), ['Kimi Code Helper.app'])
+  assert.deepEqual(await readdir(join(root, 'installed')), ['Navo.app'])
   corrupt = false
   await run()
   // The detached helper waits for Electron to exit before replacing the fixture bundle.
@@ -91,7 +91,7 @@ try {
   assert.equal(await readFile(marker, 'utf8'), '0.2.0')
   assert.match(await readFile(join(installed, 'Contents/Info.plist'), 'utf8'), /0\.2\.0/)
   const backup = (await readdir(join(root, 'installed'))).find((name) =>
-    name.startsWith('.kimi-helper-update-')
+    name.startsWith('.navo-update-')
   )
   assert.ok(backup)
   assert.match(

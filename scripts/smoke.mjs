@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { _electron as electron } from 'playwright'
 import { createServer } from 'node:http'
 
-const userData = await mkdtemp(join(tmpdir(), 'kimi-helper-smoke-'))
+const userData = await mkdtemp(join(tmpdir(), 'navo-smoke-'))
 const artifacts = resolve('artifacts')
 await mkdir(artifacts, { recursive: true })
 const errors = []
@@ -154,7 +154,7 @@ const gatewayPort = reservation.address().port
 await new Promise((resolve) => reservation.close(resolve))
 
 async function launch() {
-  const env = { ...process.env, KIMI_HELPER_TEST_USER_DATA: userData }
+  const env = { ...process.env, NAVO_TEST_USER_DATA: userData }
   delete env.ELECTRON_RUN_AS_NODE
   application = await electron.launch({ args: [testEntry], env })
   const page = await application.firstWindow()
@@ -183,7 +183,7 @@ try {
   await page.screenshot({ path: join(artifacts, 'empty.png') })
 
   // The real preload exposes update state; developer builds never contact GitHub.
-  const initialUpdate = await page.evaluate(() => window.kimiHelper.getUpdateState())
+  const initialUpdate = await page.evaluate(() => window.navo.getUpdateState())
   assert.equal(initialUpdate.status, 'disabled')
   await page.getByRole('button', { name: '应用更新', exact: true }).click()
   const updateDialog = page.getByRole('dialog', { name: '应用更新' })
@@ -216,7 +216,7 @@ try {
   }, initialUpdate)
 
   // 模拟旧主进程没有新接口：显示可执行的提示，并在接口恢复后清除错误。
-  const initialGateway = await page.evaluate(() => window.kimiHelper.getGateway())
+  const initialGateway = await page.evaluate(() => window.navo.getGateway())
   await application.evaluate(({ ipcMain }) => ipcMain.removeHandler('gateway:get'))
   await page.reload()
   await page.getByRole('heading', { name: '网关服务尚未就绪', exact: true }).waitFor()
@@ -291,7 +291,7 @@ try {
       0
     )
     assert.equal(await page.getByLabel('接入方式', { exact: true }).count(), 0)
-    assert.equal(await page.evaluate(() => typeof window.kimiHelper.startLogin), 'undefined')
+    assert.equal(await page.evaluate(() => typeof window.navo.startLogin), 'undefined')
     await page.getByLabel('账号名称', { exact: true }).fill(name)
     await page.getByLabel(/^API Key/).fill(name.endsWith('A') ? 'smoke-secret-a' : 'smoke-secret-b')
     assert.equal(
@@ -359,7 +359,7 @@ try {
   const pricesTable = page.getByRole('table', { name: '模型单价', exact: true })
   assert.equal(await pricesTable.locator('tbody tr').count(), 2)
   await page.waitForFunction(
-    async () => (await window.kimiHelper.getGateway()).modelPriceCatalog.updatedAt !== null
+    async () => (await window.navo.getGateway()).modelPriceCatalog.updatedAt !== null
   )
   await pricesTable.getByRole('cell', { name: '1 USD · API 默认', exact: true }).waitFor()
   assert.equal(pricingRequests, 1)
@@ -419,9 +419,8 @@ try {
   await page.getByRole('button', { name: '保存单价', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'hidden' })
   assert.equal(
-    (await page.evaluate(() => window.kimiHelper.getGateway())).modelPrices.find(
-      (p) => p.model === 'k3'
-    ).catalogMatch.model,
+    (await page.evaluate(() => window.navo.getGateway())).modelPrices.find((p) => p.model === 'k3')
+      .catalogMatch.model,
     'kimi-for-coding'
   )
   await page.getByRole('button', { name: '编辑 Kimi Code k3 单价', exact: true }).click()
@@ -434,13 +433,12 @@ try {
   await page.screenshot({ path: join(artifacts, 'price-model-matching.png') })
   await page.getByRole('button', { name: '取消', exact: true }).click()
   assert.equal(
-    (await page.evaluate(() => window.kimiHelper.getGateway())).modelPrices.find(
-      (p) => p.model === 'k3'
-    ).input,
+    (await page.evaluate(() => window.navo.getGateway())).modelPrices.find((p) => p.model === 'k3')
+      .input,
     null
   )
   await page.getByRole('tab', { name: /账号池/ }).click()
-  const accountSnapshot = await page.evaluate(() => window.kimiHelper.getGateway())
+  const accountSnapshot = await page.evaluate(() => window.navo.getGateway())
   assert.equal(accountSnapshot.accounts.length, 2)
   assert.equal(accountSnapshot.accounts.find((a) => a.name === '开发账号 A').maxConcurrency, 5)
   assert.ok(!JSON.stringify(accountSnapshot).includes('smoke-secret'))
@@ -463,9 +461,7 @@ try {
   const originalClipboard = await application.evaluate(({ clipboard }) => clipboard.readText())
   let groupKey
   try {
-    await page.evaluate(() =>
-      window.kimiHelper.copyConnection({ groupId: 'default', format: 'key' })
-    )
+    await page.evaluate(() => window.navo.copyConnection({ groupId: 'default', format: 'key' }))
     groupKey = await application.evaluate(({ clipboard }) => clipboard.readText())
     await page.getByRole('button', { name: '复制 api.json 链接', exact: true }).click()
     await page.waitForTimeout(100)
@@ -477,7 +473,7 @@ try {
       headers: { authorization: `Bearer ${groupKey}` }
     })
     assert.equal(registryResponse.status, 200)
-    const registry = (await registryResponse.json())['kimi-code-helper']
+    const registry = (await registryResponse.json())['navo']
     assert.equal(registry.type, 'openai')
     assert.equal(registry.api, `http://127.0.0.1:${gatewayPort}/v1`)
     assert.equal(registry.models['kimi-for-coding'].name, 'Kimi For Coding')
@@ -515,9 +511,7 @@ try {
     'Bearer smoke-secret-b',
     'Bearer smoke-secret-b'
   ])
-  await page.waitForFunction(
-    async () => (await window.kimiHelper.getGateway()).requests.length === 4
-  )
+  await page.waitForFunction(async () => (await window.navo.getGateway()).requests.length === 4)
   await page.getByRole('button', { name: '返回概览', exact: true }).click()
   await page.getByRole('button', { name: '调度页', exact: true }).click()
   await page.locator('.flow-node.model').first().waitFor()
@@ -528,7 +522,7 @@ try {
   await idleSlider.focus()
   await idleSlider.press('End')
   await page.waitForFunction(
-    async () => (await window.kimiHelper.getGateway()).settings.flowIdleMinutes === 60
+    async () => (await window.navo.getGateway()).settings.flowIdleMinutes === 60
   )
   await page.reload()
   await page.getByRole('slider', { name: '空闲节点保留时间' }).waitFor()
@@ -542,7 +536,7 @@ try {
   await page.mouse.move(sliderBounds.x + 6, sliderBounds.y + sliderBounds.height / 2, { steps: 8 })
   await page.mouse.up()
   await page.waitForFunction(
-    async () => (await window.kimiHelper.getGateway()).settings.flowIdleMinutes === 5
+    async () => (await window.navo.getGateway()).settings.flowIdleMinutes === 5
   )
   const flowInitialTheme = await page.locator('html').getAttribute('data-theme')
   for (const [themeName, themeId, background] of [
@@ -684,7 +678,7 @@ try {
   await costCard.getByText('估算总额', { exact: false }).first().waitFor()
   assert.equal(await quotaCard.locator('.quota-cost-estimate').count(), 2)
   const estimatedAccount = await page.evaluate(async () =>
-    (await window.kimiHelper.getGateway()).accounts.find((account) => account.name === '开发账号 B')
+    (await window.navo.getGateway()).accounts.find((account) => account.name === '开发账号 B')
   )
   for (const [key, fraction] of [
     ['fiveHour', 0.3],
@@ -711,7 +705,7 @@ try {
   const cycleDialog = page.getByRole('dialog', { name: '开发账号 B · 5H 统计周期', exact: true })
   await cycleDialog.getByRole('button', { name: '排除统计', exact: true }).click()
   await cycleDialog.getByText('已排除', { exact: true }).waitFor()
-  const excludedSnapshot = await page.evaluate(() => window.kimiHelper.getGateway())
+  const excludedSnapshot = await page.evaluate(() => window.navo.getGateway())
   assert.deepEqual(
     excludedSnapshot.accounts.find((a) => a.name === '开发账号 B').quotaEstimates.fiveHour.averages,
     []
@@ -724,7 +718,7 @@ try {
   await page.screenshot({ path: join(artifacts, 'quota-cycle-manager.png') })
   await cycleDialog.getByRole('button', { name: '恢复统计', exact: true }).click()
   await cycleDialog.getByText('参与均值', { exact: true }).waitFor()
-  const restoredCycles = await page.evaluate(() => window.kimiHelper.getGateway())
+  const restoredCycles = await page.evaluate(() => window.navo.getGateway())
   assert.equal(
     restoredCycles.accounts.find((a) => a.name === '开发账号 B').quotaEstimates.fiveHour.averages[0]
       .cycles,
@@ -766,7 +760,7 @@ try {
   // 无效 IPC 输入应被主进程拒绝，不能污染已保存的主题。
   const rejected = await page.evaluate(async () => {
     try {
-      await window.kimiHelper.saveSettings({ theme: 'invalid' })
+      await window.navo.saveSettings({ theme: 'invalid' })
       return false
     } catch {
       return true
@@ -779,7 +773,7 @@ try {
   page = await launch()
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark')
   await page.getByRole('button', { name: '停止网关', exact: true }).waitFor()
-  const restoredGateway = await page.evaluate(() => window.kimiHelper.getGateway())
+  const restoredGateway = await page.evaluate(() => window.navo.getGateway())
   assert.equal(restoredGateway.modelPriceCatalog.prices.length, 2)
   assert.equal(restoredGateway.modelPriceCatalog.error, '')
   assert.equal(
@@ -905,7 +899,7 @@ try {
   assert.equal(
     await page.evaluate(
       async () =>
-        (await window.kimiHelper.getGateway()).accounts.find((a) => a.name === '备用账号 B')
+        (await window.navo.getGateway()).accounts.find((a) => a.name === '备用账号 B')
           .maxConcurrency
     ),
     7
@@ -944,9 +938,7 @@ try {
   application = undefined
   page = await launch()
   const deepseekAccount = await page.evaluate(async () =>
-    (await window.kimiHelper.getGateway()).accounts.find(
-      (account) => account.provider === 'deepseek'
-    )
+    (await window.navo.getGateway()).accounts.find((account) => account.provider === 'deepseek')
   )
   assert.equal(deepseekAccount.name, 'DeepSeek 测试账号')
   assert.equal(deepseekAccount.capabilities.balance.balances.length, 2)
@@ -996,9 +988,7 @@ try {
   application = undefined
   page = await launch()
   const goAccount = await page.evaluate(async () =>
-    (await window.kimiHelper.getGateway()).accounts.find(
-      (account) => account.provider === 'opencode-go'
-    )
+    (await window.navo.getGateway()).accounts.find((account) => account.provider === 'opencode-go')
   )
   assert.equal(goAccount.capabilities.quota.monthly.remaining, 70)
   assert.equal(goAccount.capabilities.quota.unit, 'percent')
@@ -1024,12 +1014,12 @@ try {
   const performancePreview = await page.evaluate(async () => {
     const start = new Date()
     start.setHours(0, 0, 0, 0)
-    const stats = await window.kimiHelper.getUsageStats({
+    const stats = await window.navo.getUsageStats({
       start: start.getTime(),
       end: start.getTime() + 86400000,
       bucketMs: 3600000
     })
-    const snapshot = await window.kimiHelper.getGateway()
+    const snapshot = await window.navo.getGateway()
     stats.byAccount = [
       {
         accountId: snapshot.accounts[0].id,
@@ -1121,7 +1111,7 @@ try {
   )
   // The history handler still uses the real database (the usage handler above is a fixture).
   await page.evaluate(async () => {
-    await window.kimiHelper.getRequestHistory()
+    await window.navo.getRequestHistory()
   })
   await Promise.all([
     application.waitForEvent('close'),

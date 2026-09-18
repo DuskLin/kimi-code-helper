@@ -41,9 +41,7 @@ export function validateMacArchive(entries: string[]): void {
     !entries.length ||
     entries.some(
       (entry) =>
-        !entry.startsWith('Kimi Code Helper.app/') ||
-        entry.split('/').includes('..') ||
-        entry.includes('\\')
+        !entry.startsWith('Navo.app/') || entry.split('/').includes('..') || entry.includes('\\')
     )
   )
     throw new Error('更新压缩包包含无效路径')

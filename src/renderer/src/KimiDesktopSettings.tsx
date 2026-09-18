@@ -12,7 +12,7 @@ export function KimiDesktopSettings() {
     const poll = async () => {
       if (pending.current) return
       try {
-        const result = await window.kimiHelper.getKimiDesktop()
+        const result = await window.navo.getKimiDesktop()
         if (alive && !pending.current) setState(result)
       } catch {
         if (alive) setError('无法读取桌面集成状态')
@@ -42,7 +42,7 @@ export function KimiDesktopSettings() {
   const save = (patch: Partial<KimiDesktopPreferences>) => {
     if (!state) return
     void action(() =>
-      window.kimiHelper.saveKimiDesktop({
+      window.navo.saveKimiDesktop({
         enabled: state.enabled,
         autoReapply: state.autoReapply,
         ...patch
@@ -84,7 +84,7 @@ export function KimiDesktopSettings() {
             <button
               className="button"
               disabled={busy || !state.enabled || !state.compatible}
-              onClick={() => void action(() => window.kimiHelper.reapplyKimiDesktop())}
+              onClick={() => void action(() => window.navo.reapplyKimiDesktop())}
             >
               {busy ? '处理中…' : '重新注入'}
             </button>

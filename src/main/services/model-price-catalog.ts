@@ -195,7 +195,7 @@ export class ModelPriceCatalog {
   private async fetchAndSave(): Promise<void> {
     try {
       const response = await this.request(MODEL_PRICE_API, {
-        headers: { accept: 'application/json', 'user-agent': 'Kimi-Code-Helper' },
+        headers: { accept: 'application/json', 'user-agent': 'Navo' },
         signal: AbortSignal.timeout(15000),
         redirect: 'error'
       })

@@ -49,7 +49,7 @@ DeepSeek 的原生协议路由：Chat Completions、Responses 使用 `https://ap
 
 ### Kimi Code CLI
 
-「Kimi 配置」复制的是 TOML 配置示例。合并到 Kimi CLI 的 `~/.kimi/config.toml`，保留原有其他设置；`default_model` 放在文件顶层并设为 `"kimi-helper"`。也可通过 `kimi --model kimi-helper` 选择该模型。
+「Kimi 配置」复制的是 TOML 配置示例。合并到 Kimi CLI 的 `~/.kimi/config.toml`，保留原有其他设置；`default_model` 放在文件顶层并设为 `"navo"`。也可通过 `kimi --model navo` 选择该模型。
 
 复制的 provider 使用 `type = "kimi"`、网关的 `/v1` 地址与本地密钥，模型使用 `kimi-for-coding`。需要其他模型时修改 `model`，并确认对应账号的上游模型列表包含它。网关不改写模型名。
 
@@ -153,7 +153,7 @@ electron.vite.config.ts    # 开发与构建配置
 electron-builder.yml       # 跨平台打包配置
 ```
 
-主题设置保存在 Electron `app.getPath('userData')` 下的 `settings.json`。macOS 默认位置为 `~/Library/Application Support/Kimi Code Helper/settings.json`。首次启动默认浅色；设置缺失或格式无效时使用默认值。
+主题设置保存在 Electron `app.getPath('userData')` 下的 `settings.json`。macOS 默认位置为 `~/Library/Application Support/Navo/settings.json`。首次启动默认浅色；设置缺失或格式无效时使用默认值。
 
 账号与网关配置位于同目录的 `gateway.json`，使用 Electron `safeStorage` 的系统密钥加密整份配置，再以 `0600` 权限原子写入。Linux 系统密钥环不可用时拒绝保存凭据，不降级到明文存储。加密文件依赖原系统钥匙串，不适合直接复制到另一台机器；无法解密或格式损坏时保留原文件并显示启动错误，不覆盖账号数据。单实例锁防止多个进程同时写入同一份配置。
 

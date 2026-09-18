@@ -127,8 +127,13 @@ test('generic SDKs, models, comments and substring collisions do not invent harn
 test('explicit attribution supports every client even with a generic or overridden UA', () => {
   for (const h of HARNESSES) {
     assert.equal(identifyHarness({ 'user-agent': 'node' }, h.id), h.name)
+    assert.equal(identifyHarness({ 'user-agent': 'node', 'x-navo-harness': h.id }), h.name)
     assert.equal(identifyHarness({ 'user-agent': 'node', 'x-kimi-helper-harness': h.id }), h.name)
   }
+  assert.equal(
+    identifyHarness({ 'x-navo-harness': 'cline', 'x-kimi-helper-harness': 'pi' }),
+    'Cline'
+  )
   assert.equal(identifyHarness({ 'user-agent': 'opencode/1', 'x-opencode-client': 'pi' }), 'Pi')
   assert.equal(
     identifyHarness({ 'user-agent': 'OpenAI/JS 1', 'x-client-type': 'cline-sdk' }),

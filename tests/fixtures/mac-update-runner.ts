@@ -8,7 +8,7 @@ import { UpdateService } from '../../src/main/services/updates'
 const root = process.env.KIMI_UPDATE_FIXTURE
 if (!root) throw new Error('Missing isolated updater fixture')
 app.setPath('userData', join(root, 'user-data'))
-app.setPath('exe', join(root, 'installed/Kimi Code Helper.app/Contents/MacOS/fixture'))
+app.setPath('exe', join(root, 'installed/Navo.app/Contents/MacOS/fixture'))
 app.getVersion = () => '0.1.0'
 Object.defineProperty(app, 'isPackaged', { value: true })
 

@@ -28,13 +28,13 @@ test('Mac executable architecture validation accepts thin and universal binaries
 })
 
 test('Mac archives reject absolute paths, traversal and other bundles', () => {
-  validateMacArchive(['Kimi Code Helper.app/', 'Kimi Code Helper.app/Contents/Info.plist'])
+  validateMacArchive(['Navo.app/', 'Navo.app/Contents/Info.plist'])
   for (const entries of [
     [],
     ['/tmp/evil'],
-    ['Kimi Code Helper.app/../../evil'],
+    ['Navo.app/../../evil'],
     ['Other.app/'],
-    ['Kimi Code Helper.app/..\\evil']
+    ['Navo.app/..\\evil']
   ])
     assert.throws(() => validateMacArchive(entries))
 })
@@ -46,7 +46,7 @@ for (const success of [true, false]) {
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "kimi update '$ test-"))
       try {
-        const target = join(dir, 'Kimi Code Helper.app')
+        const target = join(dir, 'Navo.app')
         const staged = join(dir, 'staged.app')
         const backup = join(dir, 'previous.app')
         for (const path of [target, staged]) await mkdir(path)

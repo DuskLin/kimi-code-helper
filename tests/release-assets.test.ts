@@ -15,7 +15,7 @@ test('release manifests merge both Mac architectures and reject corrupt assets',
     for (const arch of ['x64', 'arm64']) {
       const platform = join(source, `mac-${arch}`)
       await mkdir(platform, { recursive: true })
-      const url = `kimi-code-helper-0.2.0-mac-${arch}.zip`
+      const url = `Navo-0.2.0-mac-${arch}.zip`
       const data = Buffer.from(arch)
       await writeFile(join(platform, url), data)
       await writeFile(
@@ -39,7 +39,7 @@ test('release manifests merge both Mac architectures and reject corrupt assets',
     assert.equal(manifest.files.length, 2)
     assert.ok(manifest.files.some((file: { url: string }) => file.url.includes('arm64')))
     assert.ok(manifest.files.some((file: { url: string }) => file.url.includes('x64')))
-    await writeFile(join(source, 'mac-arm64/kimi-code-helper-0.2.0-mac-arm64.zip'), 'corrupt')
+    await writeFile(join(source, 'mac-arm64/Navo-0.2.0-mac-arm64.zip'), 'corrupt')
     await assert.rejects(run('invalid'), /checksum/)
   } finally {
     await rm(dir, { recursive: true, force: true })

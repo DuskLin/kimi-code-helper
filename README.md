@@ -185,20 +185,20 @@ flowchart LR
 点击「Kimi 配置」可复制配置。将下面内容合并到 `~/.kimi/config.toml`，保留其他设置；`default_model` 应位于文件顶层：
 
 ```toml
-default_model = "kimi-helper"
+default_model = "navo"
 
-[providers.kimi-helper]
+[providers.navo]
 type = "kimi"
 base_url = "http://127.0.0.1:17300/v1"
 api_key = "<GATEWAY_KEY>"
 
-[models.kimi-helper]
-provider = "kimi-helper"
+[models.navo]
+provider = "navo"
 model = "kimi-for-coding"
 max_context_size = 262144
 ```
 
-也可以通过 `kimi --model kimi-helper` 选择模型。切换模型时，请同步调整模型 ID 和相应上下文配置。
+也可以通过 `kimi --model navo` 选择模型。切换模型时，请同步调整模型 ID 和相应上下文配置。
 
 ### Claude Code / Anthropic 客户端
 
@@ -295,9 +295,11 @@ git push origin v0.1.0
 
 ### App 内升级
 
+Navo 的应用包名、Bundle ID 和更新 ZIP 已统一为新名称。仍使用旧包名的版本需手动安装新版 `Navo.app` 一次；旧版更新器无法识别新包名。注册表供应商 ID 与复制的配置示例使用 `navo`，已有客户端配置可继续使用网关地址，重新导入时请选择新供应商。
+
 安装版启动 10 秒后检查 GitHub 正式版，此后每 6 小时检查一次，也可点击右下角「检查更新」。发现新版会提示并后台下载，下载完成后点击「重启并安装」即可自动安装并重新打开，账号和设置保留。安装前会确认重启，因为这会中断正在处理的网关请求。开发模式不检查更新，预发布版不推送给用户。
 
-macOS 从 GitHub 下载对应架构的 ZIP，校验 SHA-512、应用标识和版本后，在退出时自动替换 App；无需 Apple Developer 证书或上架 App Store。请先将 App 安装到可写目录（通常为 Applications），不要直接从 DMG 运行。替换或启动命令失败时恢复旧版；旧 App 备份保留在安装目录旁的 `.kimi-helper-update-*/previous.app`，确认新版正常后可删除该备份目录。Windows 使用 NSIS 安装器，Linux 需运行可写的 AppImage。
+macOS 从 GitHub 下载对应架构的 ZIP，校验 SHA-512、应用标识和版本后，在退出时自动替换 App；无需 Apple Developer 证书或上架 App Store。请先将 App 安装到可写目录（通常为 Applications），不要直接从 DMG 运行。替换或启动命令失败时恢复旧版；旧 App 备份保留在安装目录旁的 `.navo-update-*/previous.app`，确认新版正常后可删除该备份目录。Windows 使用 NSIS 安装器，Linux 需运行可写的 AppImage。
 
 CI 会上传安装包、blockmap 和更新清单，并合并 macOS 两种架构的 `latest-mac.yml`。建议等 Release 草稿的全部附件上传完毕再发布；不要删除 ZIP 或更新清单。第一次需手动安装包含此功能的版本，之后发布更高版本即可在 App 内升级。更新源是公开 GitHub Releases，不在客户端内放置 GitHub Token。
 

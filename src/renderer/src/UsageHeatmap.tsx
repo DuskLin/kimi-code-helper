@@ -55,7 +55,7 @@ export function UsageHeatmap({
     setError('')
     const end = new Date(selected)
     end.setDate(end.getDate() + 1)
-    void window.kimiHelper
+    void window.navo
       .getUsageStats({ start: selected, end: end.getTime(), bucketMs: 3600000 })
       .then((result) => {
         if (active) setDetail(result)

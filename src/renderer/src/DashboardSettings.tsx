@@ -16,7 +16,7 @@ export function DashboardSettings() {
     const poll = () => {
       if (actionBusy.current) return
       const version = actionVersion.current
-      return window.kimiHelper
+      return window.navo
         .getDashboard()
         .then((s) => {
           if (alive && !actionBusy.current && version === actionVersion.current) {
@@ -44,7 +44,7 @@ export function DashboardSettings() {
     setMessage('')
     try {
       await fn()
-      setState(await window.kimiHelper.getDashboard())
+      setState(await window.navo.getDashboard())
       setMessage(success)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '操作失败')
@@ -56,8 +56,8 @@ export function DashboardSettings() {
   async function toggleEnabled(enabled: boolean) {
     await action(
       async () => {
-        const current = await window.kimiHelper.getDashboard()
-        const updated = await window.kimiHelper.saveDashboard({ ...current.settings, enabled })
+        const current = await window.navo.getDashboard()
+        const updated = await window.navo.saveDashboard({ ...current.settings, enabled })
         setState(updated)
         setForm((draft) =>
           draft ? { ...draft, enabled: updated.settings.enabled } : updated.settings
@@ -191,7 +191,7 @@ export function DashboardSettings() {
                 <button
                   className="button dashboard-inline-action"
                   disabled={busy || !state.running}
-                  onClick={() => void action(() => window.kimiHelper.openDashboard())}
+                  onClick={() => void action(() => window.navo.openDashboard())}
                 >
                   <ExternalLink size={13} />
                   打开
@@ -209,10 +209,7 @@ export function DashboardSettings() {
                           aria-label={`复制局域网地址 ${url}`}
                           disabled={busy}
                           onClick={() =>
-                            void action(
-                              () => window.kimiHelper.copyDashboardUrl(url),
-                              '局域网地址已复制'
-                            )
+                            void action(() => window.navo.copyDashboardUrl(url), '局域网地址已复制')
                           }
                         >
                           <Copy size={13} />
@@ -234,7 +231,7 @@ export function DashboardSettings() {
                       className="button dashboard-inline-action"
                       disabled={busy}
                       onClick={() =>
-                        void action(() => window.kimiHelper.copyDashboardUrl(), '公网地址已复制')
+                        void action(() => window.navo.copyDashboardUrl(), '公网地址已复制')
                       }
                     >
                       <Copy size={13} />
@@ -276,7 +273,7 @@ export function DashboardSettings() {
                 <button
                   className="button dashboard-inline-action"
                   disabled={busy || state.tunnel !== 'connected' || checkStatus === 'checking'}
-                  onClick={() => void action(() => window.kimiHelper.checkDashboardPublic())}
+                  onClick={() => void action(() => window.navo.checkDashboardPublic())}
                 >
                   <RefreshCw size={12} />
                   重新检测
@@ -306,7 +303,7 @@ export function DashboardSettings() {
                 disabled={busy || !state.running}
                 onClick={() =>
                   void action(
-                    () => window.kimiHelper.copyDashboardCode(),
+                    () => window.navo.copyDashboardCode(),
                     '访问码已复制，请粘贴到仪表盘登录页'
                   )
                 }
@@ -329,7 +326,7 @@ export function DashboardSettings() {
                   disabled={busy}
                   onClick={() =>
                     void action(
-                      () => window.kimiHelper.rotateDashboardCode(),
+                      () => window.navo.rotateDashboardCode(),
                       '访问码已重置，所有设备已退出'
                     )
                   }
@@ -366,7 +363,7 @@ export function DashboardSettings() {
               disabled={busy}
               onClick={() =>
                 void action(async () => {
-                  await window.kimiHelper.saveDashboard({
+                  await window.navo.saveDashboard({
                     ...form,
                     enabled: state.running,
                     ...(token ? { token } : {})

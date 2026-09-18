@@ -13,7 +13,7 @@ export function UpdateControl({ version }: { version?: string }) {
     let timer: ReturnType<typeof setTimeout>
     const poll = async () => {
       try {
-        const next = await window.kimiHelper.getUpdateState()
+        const next = await window.navo.getUpdateState()
         if (active) setState(next)
       } catch {
         if (active) setError('更新服务连接失败，请重新打开应用。')
@@ -48,7 +48,7 @@ export function UpdateControl({ version }: { version?: string }) {
     setError('')
     try {
       await action()
-      setState(await window.kimiHelper.getUpdateState())
+      setState(await window.navo.getUpdateState())
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -128,14 +128,14 @@ export function UpdateControl({ version }: { version?: string }) {
             <div className="modal-actions">
               <button
                 className="button"
-                onClick={() => void act(() => window.kimiHelper.openReleasePage())}
+                onClick={() => void act(() => window.navo.openReleasePage())}
               >
                 发布页
               </button>
               {state?.status === 'downloaded' ? (
                 <button
                   className="button primary"
-                  onClick={() => void act(() => window.kimiHelper.installUpdate())}
+                  onClick={() => void act(() => window.navo.installUpdate())}
                 >
                   重启并安装
                 </button>
@@ -143,7 +143,7 @@ export function UpdateControl({ version }: { version?: string }) {
                 <button
                   className="button primary"
                   disabled={!state || !!busy || state.status === 'disabled'}
-                  onClick={() => void act(() => window.kimiHelper.checkForUpdates())}
+                  onClick={() => void act(() => window.navo.checkForUpdates())}
                 >
                   {state?.status === 'error' ? '重试更新' : '检查更新'}
                 </button>

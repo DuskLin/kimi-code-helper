@@ -276,7 +276,7 @@ test('api.json exports a live authenticated Kimi Code registry without secrets',
       403
     )
     const empty = await (await fetch(url, { headers })).json()
-    assert.deepEqual(empty['kimi-code-helper'].models, {})
+    assert.deepEqual(empty['navo'].models, {})
     await gateway.saveAccount(accountInput('a'))
     await gateway.saveAccount(accountInput('b'))
     const requestsBefore = gateway.snapshot().requests.length
@@ -288,8 +288,8 @@ test('api.json exports a live authenticated Kimi Code registry without secrets',
     assert.ok(!body.includes(group.key))
     assert.ok(!body.includes('secret-a'))
     assert.deepEqual(JSON.parse(body), {
-      'kimi-code-helper': {
-        id: 'kimi-code-helper',
+      navo: {
+        id: 'navo',
         name: 'Navo',
         type: 'openai',
         api: `${reserved.url}/v1`,
@@ -308,7 +308,7 @@ test('api.json exports a live authenticated Kimi Code registry without secrets',
       data.accounts[1].models = ['updated-model']
     })
     const updated = await (await fetch(url, { headers })).json()
-    assert.deepEqual(Object.keys(updated['kimi-code-helper'].models), ['updated-model'])
+    assert.deepEqual(Object.keys(updated['navo'].models), ['updated-model'])
     await f.store.mutate((data) => {
       data.groups[0].enabled = false
     })
@@ -750,7 +750,7 @@ test('LAN sharing preserves loopback, requires authentication and advertises the
       )
       const result = await fetch(`${url}/api.json`, { headers })
       assert.equal(result.status, 200)
-      assert.equal((await result.json())['kimi-code-helper'].api, `${url}/v1`)
+      assert.equal((await result.json())['navo'].api, `${url}/v1`)
       if (url !== reserved.url) {
         const lanAddress = new URL(url).hostname
         assert.equal(
@@ -2161,7 +2161,7 @@ test('harness endpoints identify every supported client and preserve protocol pa
       path: req.url!,
       ua: req.headers['user-agent'],
       auth: req.headers.authorization,
-      hint: req.headers['x-kimi-helper-harness']
+      hint: req.headers['x-navo-harness'] ?? req.headers['x-kimi-helper-harness']
     })
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }))
@@ -2191,7 +2191,7 @@ test('harness endpoints identify every supported client and preserve protocol pa
     const listed = await fetch(`${f.url}/harness/qoder/v1/models`)
     assert.equal(listed.status, 200)
     assert.ok((await listed.json()).data.some((m: { id: string }) => m.id === 'kimi-for-coding'))
-    const header = await f.post({}, { 'user-agent': 'node', 'x-kimi-helper-harness': 'workbuddy' })
+    const header = await f.post({}, { 'user-agent': 'node', 'x-navo-harness': 'workbuddy' })
     await header.text()
     await eventually(() => f.gateway.snapshot().liveFlows?.at(-1)?.endedAt != null)
     assert.equal(f.gateway.snapshot().liveFlows!.at(-1)!.harness, 'WorkBuddy')
@@ -2278,7 +2278,7 @@ test('deleted account models stay excluded after sync and restart, can be restor
       ['keep', 'new']
     )
     const registry = await (await fetch(`${reserved.url}/api.json`, { headers })).json()
-    assert.deepEqual(Object.keys(registry['kimi-code-helper'].models), ['keep', 'new'])
+    assert.deepEqual(Object.keys(registry['navo'].models), ['keep', 'new'])
     const rejected = await fetch(`${reserved.url}/v1/chat/completions`, {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json' },

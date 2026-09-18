@@ -19,7 +19,7 @@ globalThis.fetch = async (input) => {
 require(${JSON.stringify(resolve('out/main/index.js'))});
 `
 )
-const env = { ...process.env, KIMI_HELPER_TEST_USER_DATA: directory }
+const env = { ...process.env, NAVO_TEST_USER_DATA: directory }
 delete env.ELECTRON_RUN_AS_NODE
 let app, browser
 try {
@@ -27,8 +27,8 @@ try {
   const desktop = await app.firstWindow()
   await desktop.getByRole('button', { name: '设置', exact: true }).waitFor()
   await desktop.evaluate(async () => {
-    const state = await window.kimiHelper.getGateway()
-    await window.kimiHelper.saveAccount({
+    const state = await window.navo.getGateway()
+    await window.navo.saveAccount({
       name: '实时验证账号',
       kind: 'api-key',
       provider: 'kimi',
@@ -41,7 +41,7 @@ try {
   const port = 52000 + Math.floor(Math.random() * 8000)
   const state = await desktop.evaluate(
     async (port) =>
-      window.kimiHelper.saveDashboard({
+      window.navo.saveDashboard({
         enabled: true,
         lan: true,
         port,
@@ -52,7 +52,7 @@ try {
   )
   assert.equal(state.running, true)
   const originalClipboard = await app.evaluate(({ clipboard }) => clipboard.readText())
-  await desktop.evaluate(() => window.kimiHelper.copyDashboardCode())
+  await desktop.evaluate(() => window.navo.copyDashboardCode())
   const code = await app.evaluate(({ clipboard }) => clipboard.readText())
   await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), originalClipboard)
   browser = await chromium.launch({ headless: true })
@@ -90,13 +90,13 @@ try {
   await desktop.getByLabel('HTTPS 端口', { exact: true }).fill(String(port + 1))
   await desktop.getByRole('switch', { name: '启用只读仪表盘', exact: true }).click()
   await desktop.getByText('仪表盘已关闭', { exact: true }).waitFor()
-  assert.equal((await desktop.evaluate(() => window.kimiHelper.getDashboard())).running, false)
+  assert.equal((await desktop.evaluate(() => window.navo.getDashboard())).running, false)
   await assert.rejects(() =>
     context.request.get(`${state.localUrl}/api/snapshot`, { timeout: 3000 })
   )
   await desktop.getByRole('switch', { name: '启用只读仪表盘', exact: true }).click()
   await desktop.getByText('仪表盘已启动', { exact: true }).waitFor()
-  const restarted = await desktop.evaluate(() => window.kimiHelper.getDashboard())
+  const restarted = await desktop.evaluate(() => window.navo.getDashboard())
   assert.equal(restarted.running, true)
   assert.equal(restarted.settings.port, port)
   assert.equal(
@@ -114,14 +114,14 @@ try {
     const result = await context.request.get(`${url}/api/snapshot`)
     assert.equal(result.status(), 401)
   }
-  await desktop.evaluate(() => window.kimiHelper.rotateDashboardCode())
+  await desktop.evaluate(() => window.navo.rotateDashboardCode())
   await page.getByRole('button', { name: '刷新额度' }).click()
   await page.getByRole('heading', { name: '登录额度仪表盘' }).waitFor()
   assert.deepEqual(errors, [])
   if (process.env.TEST_PUBLIC_TUNNEL === '1') {
     await desktop.evaluate(
       async (port) =>
-        window.kimiHelper.saveDashboard({
+        window.navo.saveDashboard({
           enabled: true,
           lan: true,
           port,
@@ -132,7 +132,7 @@ try {
     )
     let live
     for (let i = 0; i < 50; i++) {
-      live = await desktop.evaluate(() => window.kimiHelper.getDashboard())
+      live = await desktop.evaluate(() => window.navo.getDashboard())
       if (live.tunnel === 'connected') break
       if (live.tunnel === 'error') throw new Error(live.error)
       await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -167,7 +167,7 @@ try {
         await new Promise((resolve) => setTimeout(resolve, 5000))
       }
       assert.equal(publicStatus, 401)
-      await desktop.evaluate(() => window.kimiHelper.copyDashboardCode())
+      await desktop.evaluate(() => window.navo.copyDashboardCode())
       const currentCode = await app.evaluate(({ clipboard }) => clipboard.readText())
       await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), originalClipboard)
       const authenticated = await app.evaluate(

@@ -238,13 +238,13 @@ export function UsageDashboard({
       end.setDate(end.getDate() + 1)
       try {
         const [result, daily] = await Promise.all([
-          window.kimiHelper.getUsageStats({
+          window.navo.getUsageStats({
             start: start.getTime(),
             end: end.getTime(),
             bucketMs: 3600000
           }),
           showTokenActivity
-            ? window.kimiHelper.getUsageStats({
+            ? window.navo.getUsageStats({
                 ...heatmapRange(),
                 bucketMs: 86400000,
                 allHistory: true

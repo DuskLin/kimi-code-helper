@@ -5,6 +5,7 @@ import { GatewayPanel, type GatewayStatus, type GatewayPage } from './GatewayPan
 import appLogo from './assets/navo-logo.png'
 import { UpdateControl } from './UpdateControl'
 
+// Keep the persisted key so existing Navo display preferences survive the rename.
 const viewStorageKey = 'kimi-helper.main-view'
 
 export function App() {
@@ -44,7 +45,7 @@ export function App() {
     copying.current = true
     setCopied(undefined)
     try {
-      await window.kimiHelper.copyConnection({ groupId: 'default', format })
+      await window.navo.copyConnection({ groupId: 'default', format })
       setCopied(format)
     } catch {
       setError('复制失败，请重试。')
@@ -58,8 +59,8 @@ export function App() {
     async function initialize() {
       try {
         const [appInfo, settings] = await Promise.all([
-          window.kimiHelper.getAppInfo(),
-          window.kimiHelper.getSettings()
+          window.navo.getAppInfo(),
+          window.navo.getSettings()
         ])
         if (!active) return
         document.documentElement.dataset.theme = settings.theme
@@ -81,7 +82,7 @@ export function App() {
     changingTheme.current = true
     setSaving(true)
     try {
-      const saved = await window.kimiHelper.saveSettings({ theme: next })
+      const saved = await window.navo.saveSettings({ theme: next })
       document.documentElement.dataset.theme = saved.theme
       setTheme(saved.theme)
       setError('')

@@ -31,8 +31,7 @@ import kimiQuotaWidget from '../../scripts/kimi-quota/widget.js?raw'
 app.setName('Navo')
 app.setPath('userData', join(app.getPath('appData'), 'Navo'))
 // 自动化验证使用临时目录，避免改变用户设置。
-if (process.env.KIMI_HELPER_TEST_USER_DATA)
-  app.setPath('userData', process.env.KIMI_HELPER_TEST_USER_DATA)
+if (process.env.NAVO_TEST_USER_DATA) app.setPath('userData', process.env.NAVO_TEST_USER_DATA)
 const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 let gateway: Gateway | undefined

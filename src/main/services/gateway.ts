@@ -442,7 +442,7 @@ export class Gateway {
       case 'key':
         return group.key
       case 'kimi':
-        return `default_model = "kimi-helper"\n\n[providers.kimi-helper]\ntype = "kimi"\nbase_url = "${url}/v1"\napi_key = "${group.key}"\n\n[models.kimi-helper]\nprovider = "kimi-helper"\nmodel = "kimi-for-coding"\nmax_context_size = 262144\n`
+        return `default_model = "navo"\n\n[providers.navo]\ntype = "kimi"\nbase_url = "${url}/v1"\napi_key = "${group.key}"\n\n[models.navo]\nprovider = "navo"\nmodel = "kimi-for-coding"\nmax_context_size = 262144\n`
       case 'anthropic':
         return `export ANTHROPIC_BASE_URL='${url}'\nexport ANTHROPIC_AUTH_TOKEN='${group.key}'\nexport ANTHROPIC_MODEL='kimi-for-coding'`
       default:
@@ -548,8 +548,8 @@ export class Gateway {
           JSON.stringify(
             isRegistry
               ? {
-                  'kimi-code-helper': {
-                    id: 'kimi-code-helper',
+                  navo: {
+                    id: 'navo',
                     name: 'Navo',
                     type: 'openai',
                     api: `http://${settings.lanSharing && isPrivateIPv4(req.socket.localAddress ?? '') ? req.socket.localAddress : '127.0.0.1'}:${settings.port}${harnessPath ? `/harness/${harnessPath[1]}` : ''}/v1`,
@@ -669,7 +669,7 @@ export class Gateway {
             headers.set('anthropic-version', '2023-06-01')
           if (account.provider === 'opencode-go') {
             headers.set('x-opencode-session', goSession)
-            if (!headers.has('user-agent')) headers.set('user-agent', 'Kimi-Code-Helper/0.2.0')
+            if (!headers.has('user-agent')) headers.set('user-agent', 'Navo')
             if (targetRoute === '/v1/messages') headers.set('x-api-key', token)
             else {
               headers.delete('anthropic-version')
