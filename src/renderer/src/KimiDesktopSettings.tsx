@@ -31,7 +31,9 @@ export function KimiDesktopSettings() {
     setBusy(true)
     setError('')
     try {
-      setState(await run())
+      const result = await run()
+      setState(result)
+      setError(result.error)
     } catch (e) {
       setError(e instanceof Error ? e.message : '操作失败，请重试')
     } finally {

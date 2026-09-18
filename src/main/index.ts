@@ -26,6 +26,11 @@ import { DashboardServer } from './services/dashboard-server'
 import { dashboardSource } from './services/dashboard-source'
 import { startKimiQuotaExport } from './services/kimi-quota-export'
 import { KimiDesktopIntegration } from './services/kimi-desktop-integration'
+import {
+  APP_MANAGEMENT_URL,
+  PERMISSION_HINT,
+  withKimiPermissionGuide
+} from './services/kimi-desktop-permission'
 import kimiQuotaWidget from '../../scripts/kimi-quota/widget.js?raw'
 
 app.setName('Navo')
@@ -227,8 +232,48 @@ void app
     }))
     handle(IPC.settingsGet, () => settings.get())
     handle(IPC.kimiDesktopGet, () => kimiDesktop!.check())
-    handle(IPC.kimiDesktopSave, (value) => kimiDesktop!.save(value))
-    handle(IPC.kimiDesktopReapply, () => kimiDesktop!.reapply())
+    const guideKimiPermission = async () => {
+      const options: Electron.MessageBoxOptions = {
+        type: 'info',
+        title: '需要 App 管理权限',
+        message: 'macOS 阻止了 Navo 修改 Kimi Code',
+        detail: `此集成需要在 Kimi Code 中添加或移除额度展示文件。\n\n${PERMISSION_HINT}\n\n如果列表中没有 Navo，可点击“＋”添加 Navo.app。`,
+        buttons: ['打开系统设置', '稍后'],
+        defaultId: 0,
+        cancelId: 1
+      }
+      const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const { response } = await (parent
+        ? dialog.showMessageBox(parent, options)
+        : dialog.showMessageBox(options))
+      if (response === 0) {
+        try {
+          await shell.openExternal(APP_MANAGEMENT_URL)
+        } catch {
+          await dialog.showMessageBox({
+            type: 'info',
+            title: '请手动打开系统设置',
+            message: '无法自动打开系统设置',
+            detail: PERMISSION_HINT,
+            buttons: ['知道了']
+          })
+        }
+      }
+    }
+    handle(IPC.kimiDesktopSave, (value) =>
+      withKimiPermissionGuide(
+        () => kimiDesktop!.save(value),
+        () => kimiDesktop!.check(),
+        guideKimiPermission
+      )
+    )
+    handle(IPC.kimiDesktopReapply, () =>
+      withKimiPermissionGuide(
+        () => kimiDesktop!.reapply(),
+        () => kimiDesktop!.check(),
+        guideKimiPermission
+      )
+    )
     handle(IPC.settingsSave, async (value) => {
       const saved = await settings.save(value)
       nativeTheme.themeSource = saved.theme
