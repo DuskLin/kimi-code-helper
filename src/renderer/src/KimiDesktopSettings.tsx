@@ -51,23 +51,26 @@ export function KimiDesktopSettings() {
   }
   return (
     <>
-      <h2>Kimi Code Desktop</h2>
-      <p className="settings-description">
-        在 Desktop 顶部显示已启用账号的额度或余额，同时显示 1～3 个，更多账号可横向滚动。
-      </p>
+      <h2 className="experimental-heading">
+        Kimi Code Desktop <span className="experimental-badge">实验性功能</span>
+      </h2>
+      <p className="settings-description">在 Desktop 顶部显示账号额度与会话统计。</p>
+      <div className="experimental-notice" role="note">
+        非官方集成，可能随 Kimi Code 更新随时失效。
+      </div>
       {state ? (
         <>
           <div className="card-display-options">
             <SettingsToggle
-              label="顶部账号额度"
-              hint="展示 Navo 账号池；点击账号查看重置时间。关闭后移除补丁。"
+              label="启用集成"
+              hint="需保持 Navo 运行，关闭后移除补丁。"
               checked={state.enabled}
               disabled={busy || !state.supported}
               onChange={(enabled) => save({ enabled })}
             />
             <SettingsToggle
-              label="更新后自动恢复注入"
-              hint="Navo 运行时检测更新；确认资源稳定且页面结构兼容后自动恢复。默认关闭。"
+              label="更新后自动恢复"
+              hint="尝试重新注入，不保证兼容新版本。"
               checked={state.autoReapply}
               disabled={busy || !state.enabled || !state.supported}
               onChange={(autoReapply) => save({ autoReapply })}
@@ -76,7 +79,7 @@ export function KimiDesktopSettings() {
           <div className="section-toolbar" style={{ marginTop: 20 }}>
             <span role="status">
               {state.version ? `Desktop ${state.version} · ` : ''}
-              {state.status}
+              {state.patched ? '已注入' : state.status}
             </span>
             <button
               className="button"
@@ -86,13 +89,8 @@ export function KimiDesktopSettings() {
               {busy ? '处理中…' : '重新注入'}
             </button>
           </div>
-          <p className="settings-description" style={{ marginTop: 16 }}>
-            注入后在 Kimi Code 按 ⌘R 或重新打开窗口生效。Navo 不会自动重启 Desktop 或打断会话。
-          </p>
-          <p className="workspace-note">
-            实验功能 · 目前支持 macOS ·
-            修改应用资源可能影响签名校验。更新后按当前版本重新备份；布局不兼容时停止注入。额度同步需要
-            Navo 保持运行。
+          <p className="settings-description" style={{ marginTop: 16, marginBottom: 0 }}>
+            仅支持 macOS · 注入后在 Kimi Code 按 ⌘R 生效。
           </p>
         </>
       ) : (

@@ -16,6 +16,7 @@ import { KimiDesktopSettings } from './KimiDesktopSettings'
 import { createPortal } from 'react-dom'
 import {
   Globe,
+  FlaskConical,
   CircleHelp,
   List,
   PanelsTopLeft,
@@ -1139,7 +1140,7 @@ export function GatewayPanel({
                 ['accounts', '账号管理', Users],
                 ['gateway', '网关设置', Settings2],
                 ['dashboard', '远程仪表盘', Globe],
-                ['kimi-desktop', 'Kimi Code Desktop', PanelsTopLeft]
+                ['kimi-desktop', '实验性功能', FlaskConical]
               ] as const
             ).map(([id, label, Icon]) => (
               <button
@@ -1650,7 +1651,7 @@ export function GatewayPanel({
             </section>
             <section
               hidden={settingsSection !== 'kimi-desktop'}
-              aria-label="Kimi Code Desktop"
+              aria-label="实验性功能"
               className="settings-pane"
             >
               <KimiDesktopSettings />

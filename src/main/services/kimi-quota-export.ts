@@ -1,6 +1,7 @@
 import { access, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AccountView } from '../../shared/contracts'
+import { KimiSessionMetrics } from './kimi-session-metrics'
 
 export const KIMI_QUOTA_ASSETS =
   '/Applications/Kimi Code.app/Contents/Resources/desktop-dist/assets'
@@ -41,15 +42,23 @@ export function startKimiQuotaExport(
   accounts: () => Parameters<typeof quotaDisplaySnapshot>[0]
 ): () => void {
   let busy = false
+  const sessions = new KimiSessionMetrics()
   const tick = async (): Promise<void> => {
     if (busy || process.platform !== 'darwin') return
     busy = true
     try {
       await access(join(userData, 'kimi-quota-experiment.enabled'))
       const target = join(KIMI_QUOTA_ASSETS, 'navo-quota-data.json')
-      await writeFile(`${target}.tmp`, JSON.stringify(quotaDisplaySnapshot(accounts())), {
-        mode: 0o600
-      })
+      const metrics = await sessions.snapshot()
+      // 读取日志期间用户可能关闭集成，写入前重新确认开关。
+      await access(join(userData, 'kimi-quota-experiment.enabled'))
+      await writeFile(
+        `${target}.tmp`,
+        JSON.stringify({ ...quotaDisplaySnapshot(accounts()), sessions: metrics }),
+        {
+          mode: 0o600
+        }
+      )
       await rename(`${target}.tmp`, target)
     } catch {
       // 默认关闭；卸载或应用更新期间不影响主业务。

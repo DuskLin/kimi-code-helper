@@ -13,6 +13,10 @@
   --on-accent: #102b4b;
   --error-background: #fff0ed;
   --error-text: #ab3d30;
+  --warning-background: #fff8eb;
+  --warning-border: #efd8aa;
+  --warning-accent: #d49a35;
+  --warning-text: #896019;
 }
 
 :root[data-theme='dark'] {
@@ -30,4 +34,8 @@
   --on-accent: #102b4b;
   --error-background: #392221;
   --error-text: #ffb1a5;
+  --warning-background: #30291d;
+  --warning-border: #59452a;
+  --warning-accent: #d5a34d;
+  --warning-text: #e7be76;
 }

@@ -4,7 +4,7 @@ import { chromium } from 'playwright'
 
 const browser = await chromium.launch({ headless: true })
 try {
-  const page = await browser.newPage({ viewport: { width: 1800, height: 900 } })
+  const page = await browser.newPage({ viewport: { width: 2100, height: 900 } })
   let fail = false
   const quota = (remaining) => ({
     limit: 100,
@@ -13,6 +13,21 @@ try {
   })
   const data = {
     exportedAt: Date.now(),
+    sessions: {
+      session_a: {
+        complete: true,
+        input: 100,
+        output: 200,
+        cacheRead: 900,
+        cacheWrite: 0,
+        totalTokens: 1200,
+        tokensPerSecond: 48.5,
+        cacheHitRate: 0.9,
+        requests: 2,
+        agents: 2,
+        speedAt: Date.now()
+      }
+    },
     accounts: [
       {
         id: 'a',
@@ -40,11 +55,23 @@ try {
       body: '<div class="chat-header" style="margin-left:270px;height:48px;display:flex;gap:14px"><div style="width:200px">会话标题</div><div class="ch-spacer" style="flex:1"></div><button id="open-file" style="width:200px">打开文件</button></div>'
     })
   })
-  await page.goto('http://quota.test')
+  await page.goto('http://quota.test/sessions/session_a')
   await page.addScriptTag({
     content: await readFile(new URL('./widget.js', import.meta.url), 'utf8')
   })
   const host = page.locator('#navo-quota-widget')
+  await host.locator('.speed').filter({ hasText: '48.5 tok/s' }).waitFor()
+  await host.getByRole('button', { name: '查看当前会话 Token 统计' }).click()
+  await host.locator('.session-panel').waitFor({ state: 'visible' })
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => history.pushState({}, '', '/sessions/session_unknown'))
+  await page.waitForFunction(
+    () =>
+      document.querySelector('#navo-quota-widget').shadowRoot.querySelector('.speed')
+        .textContent === '— tok/s'
+  )
+  await page.evaluate(() => history.pushState({}, '', '/sessions/session_a'))
+  await host.locator('.speed').filter({ hasText: '48.5 tok/s' }).waitFor()
   await host.getByText('72%', { exact: true }).waitFor()
   await host.getByRole('button', { name: '查看 <img src=x onerror=alert(1)> 额度' }).click()
   await host.getByText('剩余 10%', { exact: true }).waitFor()
@@ -72,15 +99,15 @@ try {
         .scrollLeft > 200
   )
   // 按可用宽度降为两个、一个，不遮挡右侧按钮。
-  await page.setViewportSize({ width: 1450, height: 900 })
+  await page.setViewportSize({ width: 1850, height: 900 })
   await page.waitForFunction(
     () => document.querySelector('#navo-quota-widget').dataset.visibleCount === '2'
   )
-  await page.setViewportSize({ width: 1150, height: 900 })
+  await page.setViewportSize({ width: 1500, height: 900 })
   await page.waitForFunction(
     () => document.querySelector('#navo-quota-widget').dataset.visibleCount === '1'
   )
-  await page.setViewportSize({ width: 1800, height: 900 })
+  await page.setViewportSize({ width: 2100, height: 900 })
   await host.getByRole('button', { name: '查看 <img src=x onerror=alert(1)> 额度' }).click()
   if (!(await host.locator('.panel').isVisible()))
     await host.getByRole('button', { name: '查看 <img src=x onerror=alert(1)> 额度' }).click()

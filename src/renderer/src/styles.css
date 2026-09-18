@@ -2581,6 +2581,32 @@ textarea {
   font-size: 12px;
   line-height: 1.7;
 }
+.experimental-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.experimental-badge {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--control-background);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.experimental-notice {
+  margin: -8px 0 24px;
+  padding: 12px 15px;
+  border: 1px solid var(--warning-border);
+  border-left: 3px solid var(--warning-accent);
+  border-radius: 8px;
+  background: var(--warning-background);
+  color: var(--warning-text);
+  font-size: 12px;
+  line-height: 1.8;
+}
 .settings-group + .settings-group {
   margin-top: 24px;
   padding-top: 24px;
