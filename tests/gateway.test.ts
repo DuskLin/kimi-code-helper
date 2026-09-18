@@ -537,7 +537,7 @@ test('shutdown aborts background metadata requests and does not start remaining 
 })
 
 test(
-  'account polling runs before listening and after stopping; only shutdown cancels it',
+  'account polling includes disabled accounts before listening and after stopping; only shutdown cancels it',
   { timeout: 10000 },
   async (t) => {
     const f = await storeFixture()
@@ -570,8 +570,24 @@ test(
     })
     const expire = () =>
       f.store.mutate((data) => {
-        data.accounts[0].capabilities!.checkedAt = 0
+        for (const account of data.accounts) account.capabilities!.checkedAt = 0
       })
+    const assertRemaining = (value: number) => {
+      const accounts = gateway.snapshot().accounts
+      for (const account of accounts)
+        assert.equal(account.capabilities?.quota?.weekly?.remaining, value)
+      assert.equal(accounts[1].enabled, false)
+      assert.equal(
+        gateway.scheduler.acquire(
+          [f.store.get().accounts[1]],
+          f.store.get().groups[0],
+          'm',
+          '',
+          new Set()
+        ),
+        undefined
+      )
+    }
     try {
       await f.store.saveAccount(accountInput('a'))
       await f.store.saveAccount({ ...accountInput('disabled'), enabled: false })
@@ -581,16 +597,17 @@ test(
       gateway.startAccountRefresh()
       await gateway.refreshStaleAccounts()
       assert.equal(gateway.snapshot().running, false)
-      assert.equal(calls, 2)
-      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 80)
-      assert.equal(f.store.get().accounts[1].capabilities, null)
+      assert.equal(calls, 4)
+      assertRemaining(80)
+      await gateway.refreshStaleAccounts()
+      assert.equal(calls, 4)
 
       remaining = 60
       await expire()
       t.mock.timers.tick(30000)
-      await eventually(() => calls === 4)
+      await eventually(() => calls === 8)
       await gateway.refreshStaleAccounts()
-      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 60)
+      assertRemaining(60)
 
       await gateway.setRunning(true)
       await gateway.refreshStaleAccounts()
@@ -605,18 +622,18 @@ test(
       holdModels = false
       releaseModels!()
       await gateway.refreshStaleAccounts()
-      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 40)
+      assertRemaining(40)
 
       remaining = 20
       await expire()
       t.mock.timers.tick(30000)
-      await eventually(() => calls === 8)
+      await eventually(() => calls === 16)
       await gateway.refreshStaleAccounts()
-      assert.equal(f.store.get().accounts[0].capabilities?.quota?.weekly?.remaining, 20)
+      assertRemaining(20)
       await gateway.shutdown()
       await expire()
       t.mock.timers.tick(30000)
-      assert.equal(calls, 8)
+      assert.equal(calls, 16)
     } finally {
       releaseModels?.()
       await gateway.shutdown()

@@ -392,8 +392,8 @@ export class Gateway {
   private async refreshBatch(signal: AbortSignal): Promise<void> {
     for (const account of this.store.get().accounts) {
       if (signal.aborted) return
+      // 停用只影响请求调度，额度仍需同步以便判断何时恢复使用。
       if (
-        !account.enabled ||
         !account.credential.accessToken ||
         (account.capabilities &&
           account.capabilities.quota !== undefined &&
