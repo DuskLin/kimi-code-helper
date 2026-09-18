@@ -1,5 +1,6 @@
 import { access, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { KimiDesktopPreferences } from '../../shared/kimi-desktop'
 import type { AccountView } from '../../shared/contracts'
 import { KimiSessionMetrics } from './kimi-session-metrics'
 
@@ -39,7 +40,8 @@ export function quotaDisplaySnapshot(
 
 export function startKimiQuotaExport(
   userData: string,
-  accounts: () => Parameters<typeof quotaDisplaySnapshot>[0]
+  accounts: () => Parameters<typeof quotaDisplaySnapshot>[0],
+  preferences: () => KimiDesktopPreferences
 ): () => void {
   let busy = false
   const sessions = new KimiSessionMetrics()
@@ -49,12 +51,20 @@ export function startKimiQuotaExport(
     try {
       await access(join(userData, 'kimi-quota-experiment.enabled'))
       const target = join(KIMI_QUOTA_ASSETS, 'navo-quota-data.json')
-      const metrics = await sessions.snapshot()
+      const metrics =
+        preferences().enabled && preferences().sessionStats ? await sessions.snapshot() : {}
       // 读取日志期间用户可能关闭集成，写入前重新确认开关。
       await access(join(userData, 'kimi-quota-experiment.enabled'))
+      const current = preferences()
       await writeFile(
         `${target}.tmp`,
-        JSON.stringify({ ...quotaDisplaySnapshot(accounts()), sessions: metrics }),
+        JSON.stringify({
+          ...quotaDisplaySnapshot(current.enabled && current.accountQuota ? accounts() : []),
+          enabled: current.enabled,
+          accountQuota: current.accountQuota,
+          sessionStats: current.sessionStats,
+          sessions: current.enabled && current.sessionStats ? metrics : {}
+        }),
         {
           mode: 0o600
         }

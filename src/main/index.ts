@@ -143,7 +143,8 @@ void app
     kimiDesktop.start()
     stopKimiQuotaExport = startKimiQuotaExport(
       app.getPath('userData'),
-      () => gatewayStore.get().accounts
+      () => gatewayStore.get().accounts,
+      () => kimiDesktop!.getState()
     )
     const statistics = new UsageService(gatewayStore.historyPath)
     usageService = statistics

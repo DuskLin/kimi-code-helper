@@ -123,8 +123,42 @@ try {
     content: await readFile(new URL('./widget.js', import.meta.url), 'utf8')
   })
   assert.equal(await page.locator('#navo-quota-widget').count(), 1)
+  // 独立开关动态隐藏模块和详情，并释放布局空间。
+  fail = false
+  const sync = async (accountQuota, sessionStats) => {
+    data.accountQuota = accountQuota
+    data.sessionStats = sessionStats
+    const response = page.waitForResponse((r) => r.url().includes('navo-quota-data'))
+    await host.locator('.refresh').evaluate((button) => button.click())
+    await response
+  }
+  await host.locator('.session-summary').click()
+  await sync(true, false)
+  await host.locator('.session-summary').waitFor({ state: 'hidden' })
+  assert.equal(await host.locator('.session-panel').isVisible(), false)
+  assert.equal(await host.locator('.accounts').isVisible(), true)
+  await host.locator('.account').first().click()
+  await sync(false, true)
+  await host.locator('.accounts').waitFor({ state: 'hidden' })
+  assert.equal(await host.locator('.panel').isVisible(), false)
+  assert.equal(await host.locator('.session-summary').isVisible(), true)
+  assert.equal(await host.locator('.prev').isVisible(), false)
+  assert.equal(await host.locator('.next').isVisible(), false)
+  assert.equal(await host.evaluate((el) => el.getBoundingClientRect().width), 300)
+  await page.setViewportSize({ width: 900, height: 900 })
+  await page.waitForFunction(
+    () => document.querySelector('#navo-quota-widget').getBoundingClientRect().width === 48
+  )
+  assert.equal(await host.locator('.session-summary').isVisible(), true)
+  await sync(false, false)
+  await host.waitFor({ state: 'hidden' })
+  await page.setViewportSize({ width: 2100, height: 900 })
+  await sync(true, true)
+  await host.waitFor({ state: 'visible' })
+  assert.equal(await host.locator('.accounts').isVisible(), true)
+  assert.equal(await host.locator('.session-summary').isVisible(), true)
   console.log(
-    '通过：全部账号、1～3 个响应式布局、超过 3 个横向滚动、按钮间距、名称转义、过期和断连提示、重复注入保护。'
+    '通过：全部账号、1～3 个响应式布局、超过 3 个横向滚动、按钮间距、名称转义、过期和断连提示、重复注入保护、独立模块开关及空间回收。'
   )
 } finally {
   await browser.close()

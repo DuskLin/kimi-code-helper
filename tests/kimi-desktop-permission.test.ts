@@ -33,6 +33,8 @@ test(
     const state: KimiDesktopState = {
       enabled: false,
       autoReapply: false,
+      accountQuota: true,
+      sessionStats: true,
       supported: true,
       installed: true,
       compatible: true,

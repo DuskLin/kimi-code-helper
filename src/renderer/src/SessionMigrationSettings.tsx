@@ -209,6 +209,7 @@ export function SessionMigrationSettings() {
           <h3>会话迁移</h3>
           <p>把 Zcode 中的对话带到 Kimi Code</p>
         </div>
+        <span className="lab-badge">macOS</span>
       </header>
       <div className="migration-route">
         <span>

@@ -16,6 +16,7 @@ const state =
   mode === 'status'
     ? integration.getState()
     : await integration.save({
+        ...integration.getState(),
         enabled: mode === 'install',
         autoReapply: integration.getState().autoReapply
       })

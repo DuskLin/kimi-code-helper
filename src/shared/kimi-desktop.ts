@@ -1,6 +1,8 @@
 export interface KimiDesktopPreferences {
   enabled: boolean
   autoReapply: boolean
+  accountQuota: boolean
+  sessionStats: boolean
 }
 
 export interface KimiDesktopState extends KimiDesktopPreferences {

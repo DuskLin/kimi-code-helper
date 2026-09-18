@@ -50,6 +50,8 @@ export function KimiDesktopSettings() {
       window.navo.saveKimiDesktop({
         enabled: state.enabled,
         autoReapply: state.autoReapply,
+        accountQuota: state.accountQuota,
+        sessionStats: state.sessionStats,
         ...patch
       })
     )
@@ -85,6 +87,20 @@ export function KimiDesktopSettings() {
                 checked={state.enabled}
                 disabled={busy || !state.supported}
                 onChange={(enabled) => save({ enabled })}
+              />
+              <SettingsToggle
+                label="账号额度"
+                hint="在顶部显示账号额度与余额"
+                checked={state.accountQuota}
+                disabled={busy || !state.supported}
+                onChange={(accountQuota) => save({ accountQuota })}
+              />
+              <SettingsToggle
+                label="会话统计"
+                hint="在顶部显示生成速率、Token 用量与缓存命中率"
+                checked={state.sessionStats}
+                disabled={busy || !state.supported}
+                onChange={(sessionStats) => save({ sessionStats })}
               />
               <SettingsToggle
                 label="更新后自动恢复"

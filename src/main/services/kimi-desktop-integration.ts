@@ -15,7 +15,12 @@ export class KimiDesktopIntegration {
   private appPath: string
   private widget: string
   private supported: boolean
-  private preferences: KimiDesktopPreferences = { enabled: false, autoReapply: false }
+  private preferences: KimiDesktopPreferences = {
+    enabled: false,
+    autoReapply: false,
+    accountQuota: true,
+    sessionStats: true
+  }
   private queue: Promise<unknown> = Promise.resolve()
   private timer?: ReturnType<typeof setInterval>
   private candidate = ''
@@ -81,7 +86,15 @@ export class KimiDesktopIntegration {
     const p = value as KimiDesktopPreferences | null
     if (!p || typeof p.enabled !== 'boolean' || typeof p.autoReapply !== 'boolean')
       throw new Error('桌面集成设置无效')
-    return { enabled: p.enabled, autoReapply: p.autoReapply }
+    for (const key of ['accountQuota', 'sessionStats'] as const) {
+      if (p[key] !== undefined && typeof p[key] !== 'boolean') throw new Error('桌面集成设置无效')
+    }
+    return {
+      enabled: p.enabled,
+      autoReapply: p.autoReapply,
+      accountQuota: p.accountQuota ?? true,
+      sessionStats: p.sessionStats ?? true
+    }
   }
   getState(): KimiDesktopState {
     return { ...this.state, ...this.preferences }
@@ -212,7 +225,7 @@ export class KimiDesktopIntegration {
         this.preferences = next
         await this.remove()
       } else {
-        if (!this.preferences.enabled) await this.install()
+        if (!this.preferences.enabled || !this.state.patched) await this.install()
         await this.atomic(this.config, JSON.stringify(next))
         this.preferences = next
       }
@@ -223,7 +236,7 @@ export class KimiDesktopIntegration {
   }
   reapply() {
     return this.exclusive(async () => {
-      if (!this.preferences.enabled) throw new Error('请先启用顶部账号额度')
+      if (!this.preferences.enabled) throw new Error('请先启用桌面集成')
       await this.install()
       return this.getState()
     })

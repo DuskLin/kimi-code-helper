@@ -248,12 +248,19 @@
     $('.next').disabled = list.scrollLeft + list.clientWidth >= list.scrollWidth - 2
   }
   function position() {
-    sessionMetrics()
+    const showAccounts = data?.accountQuota !== false
+    const showSession = data?.sessionStats !== false
+    $('.accounts').hidden = !showAccounts
+    $('.session-summary').hidden = !showSession
+    $('.session-summary').style.marginRight = showAccounts ? '' : '0'
+    if (!showAccounts && !$('.panel').hidden) close()
+    if (!showSession && !$('.session-panel').hidden) close()
+    if (showSession) sessionMetrics()
     const header = [...document.querySelectorAll('.chat-header')].find(
       (el) => el.getBoundingClientRect().width > 0
     )
     const spacer = header?.querySelector('.ch-spacer')
-    if (!header || !spacer || disabled) {
+    if (!header || !spacer || disabled || (!showAccounts && !showSession)) {
       host.style.display = 'none'
       return
     }
@@ -261,10 +268,11 @@
       s = spacer.getBoundingClientRect()
     // 使用真实弹性空白区，左右留白；不再用固定偏移猜测操作按钮位置。
     const whole = Math.floor(s.width - 48)
-    const sessionWidth = whole >= 600 ? 300 : 48
+    const sessionWidth = showSession ? (whole >= (showAccounts ? 600 : 300) ? 300 : 48) : 0
     $('.session-summary').classList.toggle('small', sessionWidth === 48)
-    const available = whole - sessionWidth - 12
-    if (available < 155) {
+    const sessionGap = showAccounts && showSession ? 12 : 0
+    const available = whole - sessionWidth - sessionGap
+    if (showAccounts ? available < 155 : whole < sessionWidth) {
       host.style.display = 'none'
       return
     }
@@ -273,17 +281,21 @@
     let overflow = n > count
     if (overflow) count = Math.max(1, Math.min(count, Math.floor((available - 52 + 8) / 260)))
     overflow = n > count
-    const navWidth = overflow && available >= 207 ? 52 : 0
-    cardWidth = Math.min(252, Math.floor((available - navWidth - (count - 1) * 8) / count))
+    if (!showAccounts) count = 0
+    const navWidth = showAccounts && overflow && available >= 207 ? 52 : 0
+    cardWidth = count
+      ? Math.min(252, Math.floor((available - navWidth - (count - 1) * 8) / count))
+      : 0
+    const accountsWidth = count ? count * cardWidth + (count - 1) * 8 : 0
     host.toggleAttribute('compact', cardWidth < 230)
     host.style.setProperty('--card-width', `${cardWidth}px`)
     host.style.display = ''
     host.style.top = `${r.top + (r.height - 32) / 2}px`
     host.style.right = `${innerWidth - s.right + 24}px`
-    host.style.width = `${count * cardWidth + (count - 1) * 8 + navWidth + sessionWidth + 12}px`
+    host.style.width = `${accountsWidth + navWidth + sessionWidth + sessionGap}px`
     host.dataset.visibleCount = String(count)
     $('.prev').hidden = $('.next').hidden = !navWidth
-    $('.accounts').style.width = `${count * cardWidth + (count - 1) * 8}px`
+    $('.accounts').style.width = `${accountsWidth}px`
     $('.panel').style.top = `${r.bottom + 8}px`
     $('.panel').style.right = `${Math.max(12, innerWidth - s.right + 24)}px`
     $('.session-panel').style.top = `${r.bottom + 8}px`

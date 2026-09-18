@@ -111,3 +111,40 @@ test('全部供应商进入展示快照，凭据不进入导出', () => {
   assert.equal(data.accounts.length, 3)
   assert.ok(!JSON.stringify(data).includes('PRIVATE'))
 })
+
+test('独立模块选择持久化，关闭总开关保留选择，旧配置默认开启两个模块', async () => {
+  const f = await fixture()
+  try {
+    await f.manager.save({ enabled: true, autoReapply: false })
+    assert.equal(f.manager.getState().accountQuota, true)
+    assert.equal(f.manager.getState().sessionStats, true)
+    for (const [accountQuota, sessionStats] of [
+      [true, false],
+      [false, true],
+      [false, false]
+    ]) {
+      const preferences = { enabled: true, autoReapply: true, accountQuota, sessionStats }
+      await f.manager.save(preferences)
+      await f.manager.load()
+      assert.equal(f.manager.getState().accountQuota, accountQuota)
+      assert.equal(f.manager.getState().sessionStats, sessionStats)
+      await f.manager.save({ ...preferences, enabled: false })
+      await f.manager.load()
+      assert.equal(f.manager.getState().accountQuota, accountQuota)
+      assert.equal(f.manager.getState().sessionStats, sessionStats)
+      await f.manager.save(preferences)
+      await f.update('1.0.2')
+      await f.manager.monitor()
+      await f.manager.monitor()
+      assert.equal(f.manager.getState().patched, true)
+      assert.equal(f.manager.getState().accountQuota, accountQuota)
+      assert.equal(f.manager.getState().sessionStats, sessionStats)
+    }
+    await assert.rejects(
+      f.manager.save({ enabled: true, autoReapply: false, accountQuota: 'false' }),
+      /设置无效/
+    )
+  } finally {
+    await f.cleanup()
+  }
+})
